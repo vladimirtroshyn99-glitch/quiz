@@ -336,6 +336,25 @@ export default function Home() {
     setShowActionStep(true);
   }
 
+  // ─── "Да, хочу на разбор": уведомляем Vakas и переходим ─────────────────
+  async function handleYesConsultation() {
+    try {
+      const topicLabel = TOPICS.find(t => t.id === topic)?.label;
+      fetch('/api/vakas', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          telegram: leadTelegram,
+          phone:    leadPhone,
+          sphere:   topicLabel,
+          query:    text,
+          intent:   'yes_consultation',
+        }),
+      });
+    } catch { /* fail silently */ }
+    setScreen('assistant');
+  }
+
   // ─── Инлайн-вопросы на экране результатов ────────────────────────────────
   async function askSuggestedQuestion(question, idx) {
     if (askedQuestions.has(idx) || loadingQuestion !== null) return;
@@ -754,7 +773,7 @@ export default function Home() {
         )}
 
         {/* ── Основной экран ────────────────────────────────────────────── */}
-        <main className="min-h-screen bg-[#fdf8f4] pb-16">
+        <main className="min-h-screen bg-[#fdf8f4] pb-20">
 
           {/* Шапка */}
           <div className="px-5 pt-8 flex items-center justify-between mb-8">
@@ -767,77 +786,91 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Заголовок */}
-          <div className="px-5 mb-6 max-w-sm mx-auto">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0 shadow-sm">
-                <span className="text-xl">🌷</span>
-              </div>
-              <h2 className="text-lg font-semibold text-stone-700">Твой разбор готов</h2>
+          {/* Заголовок разбора */}
+          <div className="px-5 mb-10 max-w-sm mx-auto text-center">
+            <div className="w-14 h-14 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-4 shadow-sm">
+              <span className="text-3xl">🌷</span>
             </div>
+            <h2 className="text-xl font-semibold text-stone-800 mb-1.5">Твой разбор готов</h2>
+            <p className="text-stone-400 text-[13px]">Читай внимательно — это про тебя</p>
           </div>
 
           {/* Блок 1: Вот что я вижу */}
           <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">🪞</span>
-                <h3 className="text-stone-700 font-semibold text-sm">Вот что я вижу</h3>
+            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-2xl bg-rose-50 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xl">🪞</span>
+                </div>
+                <div className="flex-1 pt-0.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400 mb-0.5">Зеркало</p>
+                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что я вижу</h3>
+                </div>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{block1_see}</p>
+              <p className="text-stone-600 text-[15px] leading-[1.7]">{block1_see}</p>
             </div>
           </div>
 
           {/* Блок 2: Вот чего ты на самом деле хочешь */}
           <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-gradient-to-br from-rose-50 to-white rounded-3xl p-5 shadow-sm border border-rose-100">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">✨</span>
-                <h3 className="text-rose-500 font-semibold text-sm">Вот чего ты на самом деле хочешь</h3>
+            <div className="bg-gradient-to-br from-rose-50 to-amber-50 rounded-3xl px-6 py-5 shadow-sm border border-rose-100">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-2xl bg-white/70 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xl">✨</span>
+                </div>
+                <div className="flex-1 pt-0.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-500 mb-0.5">Желание</p>
+                  <h3 className="text-rose-700 font-semibold text-[15px] leading-snug">Вот чего ты на самом деле хочешь</h3>
+                </div>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{block2_want}</p>
+              <p className="text-stone-600 text-[15px] leading-[1.7]">{block2_want}</p>
             </div>
           </div>
 
           {/* Визуализация «Разрыв» */}
           <div className="px-5 max-w-sm mx-auto mb-6">
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
-              <p className="text-stone-400 text-xs uppercase tracking-wide text-center mb-5">Разрыв между реальностью и желаемым</p>
+            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 text-center mb-5">Разрыв между реальностью и желаемым</p>
               <div className="mb-4">
-                <div className="flex justify-between text-xs text-stone-400 mb-2">
-                  <span>Где сейчас</span>
-                  <span className="font-medium">{chart_gap.current}%</span>
+                <div className="flex justify-between text-[13px] mb-2">
+                  <span className="text-stone-400">Где сейчас</span>
+                  <span className="text-stone-500 font-semibold">{chart_gap.current}%</span>
                 </div>
                 <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-stone-300 rounded-full transition-all duration-1000 ease-out"
+                  <div className="h-full bg-gradient-to-r from-stone-200 to-stone-300 rounded-full transition-all duration-1000 ease-out"
                     style={{ width: chartsVisible ? `${chart_gap.current}%` : '0%' }} />
                 </div>
               </div>
               <div className="mb-5">
-                <div className="flex justify-between text-xs text-rose-400 mb-2">
-                  <span>Где хочу быть</span>
-                  <span className="font-medium">{chart_gap.desired}%</span>
+                <div className="flex justify-between text-[13px] mb-2">
+                  <span className="text-rose-400">Где хочу быть</span>
+                  <span className="text-rose-500 font-semibold">{chart_gap.desired}%</span>
                 </div>
                 <div className="w-full h-3 bg-rose-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-rose-400 rounded-full transition-all duration-1000 ease-out"
+                  <div className="h-full bg-gradient-to-r from-rose-300 to-rose-400 rounded-full transition-all duration-1000 ease-out"
                     style={{ width: chartsVisible ? `${chart_gap.desired}%` : '0%', transitionDelay: '300ms' }} />
                 </div>
               </div>
-              <div className="text-center pt-3 border-t border-stone-100">
-                <span className="text-stone-400 text-xs">Разрыв: </span>
-                <span className="text-base font-bold text-rose-500">{chart_gap.desired - chart_gap.current}%</span>
+              <div className="flex items-center justify-center gap-2 pt-3 border-t border-stone-100">
+                <span className="text-stone-400 text-[13px]">Разрыв:</span>
+                <span className="text-xl font-bold text-rose-500">{chart_gap.desired - chart_gap.current}%</span>
               </div>
             </div>
           </div>
 
           {/* Блок 3: Вот что тебя держит */}
           <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">⚓</span>
-                <h3 className="text-stone-700 font-semibold text-sm">Вот что тебя держит</h3>
+            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-stone-200">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-2xl bg-stone-100 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xl">⚓</span>
+                </div>
+                <div className="flex-1 pt-0.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 mb-0.5">Корень</p>
+                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что тебя держит</h3>
+                </div>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{block3_hold}</p>
+              <p className="text-stone-600 text-[15px] leading-[1.7]">{block3_hold}</p>
             </div>
           </div>
 
@@ -847,58 +880,69 @@ export default function Home() {
               <div className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-5 py-4">
                 <div className="flex items-center gap-2 mb-1.5">
                   <div className="w-2 h-2 rounded-full bg-stone-300 flex-shrink-0" />
-                  <span className="text-xs text-stone-400 uppercase tracking-wide">Снаружи</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400">Снаружи</span>
                 </div>
-                <p className="text-stone-500 text-sm">{chart_root.surface}</p>
+                <p className="text-stone-500 text-[14px]">{chart_root.surface}</p>
               </div>
               <div className="w-px h-4 bg-gradient-to-b from-stone-200 to-rose-200" />
               <div className="w-full bg-rose-50 border border-rose-100 rounded-2xl px-5 py-4">
                 <div className="flex items-center gap-2 mb-1.5">
                   <div className="w-2 h-2 rounded-full bg-rose-300 flex-shrink-0" />
-                  <span className="text-xs text-rose-400 uppercase tracking-wide">Глубже</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400">Глубже</span>
                 </div>
-                <p className="text-stone-600 text-sm">{chart_root.deep}</p>
+                <p className="text-stone-600 text-[14px]">{chart_root.deep}</p>
               </div>
               <div className="w-px h-4 bg-gradient-to-b from-rose-200 to-rose-400" />
               <div className="w-full bg-gradient-to-br from-rose-100 to-rose-50 border border-rose-200 rounded-2xl px-5 py-5">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-base">🌱</span>
-                  <span className="text-xs text-rose-500 uppercase tracking-wide font-semibold">Родовой корень</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-500">Родовой корень</span>
                 </div>
-                <p className="text-stone-700 text-sm font-medium">{chart_root.root}</p>
+                <p className="text-stone-700 text-[14px] font-semibold">{chart_root.root}</p>
               </div>
             </div>
           </div>
 
           {/* Блок 4: Вот что ты теряешь */}
           <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-amber-100">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">⏳</span>
-                <h3 className="text-stone-700 font-semibold text-sm">Вот что ты теряешь</h3>
+            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-amber-100">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-2xl bg-amber-50 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xl">⏳</span>
+                </div>
+                <div className="flex-1 pt-0.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-amber-400 mb-0.5">Цена</p>
+                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что ты теряешь</h3>
+                </div>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{block4_lose}</p>
+              <p className="text-stone-600 text-[15px] leading-[1.7]">{block4_lose}</p>
             </div>
           </div>
 
           {/* Блок 5: Куда копать */}
           <div className="px-5 max-w-sm mx-auto mb-8">
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">🔍</span>
-                <h3 className="text-stone-700 font-semibold text-sm">Куда копать</h3>
+            <div className="bg-gradient-to-br from-stone-50 to-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-2xl bg-white border border-stone-100 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xl">🔍</span>
+                </div>
+                <div className="flex-1 pt-0.5">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 mb-0.5">Направление</p>
+                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Куда копать</h3>
+                </div>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{block5_dig}</p>
+              <p className="text-stone-600 text-[15px] leading-[1.7]">{block5_dig}</p>
             </div>
           </div>
 
-          {/* Кнопка ИИ-чата скрыта — раскомментировать при необходимости */}
-          {/* <div className="px-5 max-w-sm mx-auto mb-6 text-center">
+          {/* Кнопка ИИ-чата */}
+          <div className="px-5 max-w-sm mx-auto mb-6 text-center">
             <button onClick={() => setShowChatModal(true)}
-              className="text-rose-400 text-sm underline underline-offset-2 hover:text-rose-500 transition-colors">
-              💬 Задать вопрос ИИ-родологу
+              className="inline-flex items-center gap-2 text-rose-400 text-sm hover:text-rose-500 transition-colors">
+              <span>💬</span>
+              <span className="underline underline-offset-2">Задать вопрос ИИ-родологу</span>
             </button>
-          </div> */}
+          </div>
 
           {/* Главные CTA (скрыты после отправки формы) */}
           {!showActionStep && (
@@ -919,20 +963,25 @@ export default function Home() {
           {/* Блок action_step + финальный вопрос */}
           {showActionStep && (
             <div className="px-5 max-w-sm mx-auto">
-              <div className="bg-rose-50 border border-rose-100 rounded-3xl p-5 mb-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xl">🌱</span>
-                  <h3 className="text-rose-600 font-semibold text-sm">С чего начать прямо сейчас</h3>
+              <div className="bg-rose-50 border border-rose-100 rounded-3xl px-6 py-5 mb-5">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xl">🌱</span>
+                  </div>
+                  <div className="flex-1 pt-0.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400 mb-0.5">Первый шаг</p>
+                    <h3 className="text-rose-700 font-semibold text-[15px] leading-snug">С чего начать прямо сейчас</h3>
+                  </div>
                 </div>
-                <p className="text-stone-600 text-sm leading-relaxed">{action_step}</p>
+                <p className="text-stone-700 text-[15px] leading-[1.7]">{action_step}</p>
               </div>
 
-              <div className="bg-white rounded-3xl p-5 border border-stone-100 shadow-sm mb-8">
-                <p className="text-stone-700 font-semibold text-center text-base mb-4">
+              <div className="bg-white rounded-3xl px-6 py-5 border border-stone-100 shadow-sm mb-8">
+                <p className="text-stone-700 font-semibold text-center text-[15px] mb-5">
                   Хочешь записаться на разбор?
                 </p>
                 <div className="flex flex-col gap-3">
-                  <button onClick={() => setScreen('assistant')}
+                  <button onClick={handleYesConsultation}
                     className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform">
                     Да, хочу записаться →
                   </button>
