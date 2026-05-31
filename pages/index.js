@@ -38,7 +38,7 @@ function redirectAndroidToChrome() {
 }
 
 export default function Home() {
-  // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'|'chat'|'offer'|'form'|'thanks'|'telegram'
+  // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'|'chat'|'offer'|'assistant'|'telegram'
   const [screen, setScreen]                       = useState('start');
   const [topic, setTopic]                         = useState(null);
   const [text, setText]                           = useState('');
@@ -62,9 +62,6 @@ export default function Home() {
   const [chatInput, setChatInput]                 = useState('');
   const [questionCount, setQuestionCount]         = useState(0);
   const [isChatLoading, setIsChatLoading]         = useState(false);
-  const [formName, setFormName]                   = useState('');
-  const [formContact, setFormContact]             = useState('');
-  const [formHadExpert, setFormHadExpert]         = useState(null);
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
@@ -166,9 +163,6 @@ export default function Home() {
     setChatInput('');
     setQuestionCount(0);
     setIsChatLoading(false);
-    setFormName('');
-    setFormContact('');
-    setFormHadExpert(null);
   }
 
   // ─── Логика теста ─────────────────────────────────────────────────────────
@@ -818,7 +812,7 @@ export default function Home() {
               Твой родовой сценарий<br />поддаётся проработке
             </h2>
             <p className="text-stone-500 text-sm leading-relaxed">
-              ИИ подсветил верхушку айсберга. Чтобы навсегда убрать этот блок из жизни, нужен точечный разбор со специалистом.
+              ИИ подсветил лишь верхушку айсберга. Чтобы навсегда убрать этот блок из жизни, нужен точечный разбор со специалистом.
             </p>
           </div>
 
@@ -835,9 +829,9 @@ export default function Home() {
           )}
 
           <div className="flex flex-col gap-3 mt-auto">
-            <button onClick={() => setScreen('form')}
+            <button onClick={() => setScreen('assistant')}
               className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform leading-snug">
-              Записаться на бесплатную<br />сессию-разбор →
+              Записаться на разбор<br />к ассистенту эксперта →
             </button>
             <button onClick={() => setScreen('telegram')}
               className="w-full py-4 rounded-3xl bg-white text-stone-500 font-medium text-sm border border-stone-200 active:scale-[0.98] transition-transform shadow-sm">
@@ -850,99 +844,50 @@ export default function Home() {
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЭКРАН ЛИД-ФОРМЫ
+  // ЭКРАН АССИСТЕНТА (запись к эксперту)
   // ══════════════════════════════════════════════════════════════════════════
-  if (screen === 'form') {
-    const canSubmit = formName.trim().length > 0 && formContact.trim().length > 0 && formHadExpert !== null;
-    return (
-      <>
-        {IOSOverlay}
-        <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
-          <div className="flex items-center justify-between mb-8">
-            <button onClick={() => setScreen('offer')}
-              className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
-              ← Назад
-            </button>
-            <span className="text-stone-500 text-sm font-medium">Запись на сессию</span>
-            <div className="w-16" />
+  if (screen === 'assistant') return (
+    <>
+      {IOSOverlay}
+      <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+        <div className="flex items-center mb-10">
+          <button onClick={() => setScreen('offer')}
+            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            ← Назад
+          </button>
+        </div>
+
+        <div className="flex flex-col items-center text-center max-w-sm mx-auto w-full flex-1">
+          <div className="w-20 h-20 rounded-full bg-rose-100 flex items-center justify-center mb-6 shadow-sm">
+            <span className="text-4xl">🌷</span>
+          </div>
+          <h2 className="text-2xl font-semibold text-stone-700 mb-3 leading-snug">
+            Прекрасный выбор!
+          </h2>
+          <p className="text-stone-500 text-sm leading-relaxed max-w-xs mb-5">
+            Переходим в Telegram для связи с ассистентом эксперта.
+          </p>
+
+          <div className="bg-rose-50 border border-rose-100 rounded-3xl px-5 py-4 mb-10 w-full text-left">
+            <p className="text-stone-600 text-sm leading-relaxed">
+              Напиши в чат кодовое слово{' '}
+              <span className="font-bold text-rose-500">«РОД»</span>,
+              чтобы зафиксировать за собой место на бесплатный разбор.
+            </p>
           </div>
 
-          <div className="max-w-sm mx-auto w-full flex flex-col gap-5">
-            <div className="text-center mb-2">
-              <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-4 shadow-sm">
-                <span className="text-2xl">🌷</span>
-              </div>
-              <h2 className="text-xl font-semibold text-stone-700 mb-2">Оставь свои контакты</h2>
-              <p className="text-stone-400 text-xs leading-relaxed">Эксперт свяжется с тобой для подтверждения времени</p>
-            </div>
-
-            <div>
-              <label className="text-stone-500 text-xs font-medium mb-1.5 block pl-1">Как тебя зовут?</label>
-              <input type="text" value={formName} onChange={e => setFormName(e.target.value)}
-                placeholder="Твоё имя"
-                className="w-full px-5 py-4 rounded-2xl border border-stone-200 bg-white text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300 shadow-sm" />
-            </div>
-
-            <div>
-              <label className="text-stone-500 text-xs font-medium mb-1.5 block pl-1">Telegram @username или номер телефона</label>
-              <input type="text" value={formContact} onChange={e => setFormContact(e.target.value)}
-                placeholder="@username или +7..."
-                className="w-full px-5 py-4 rounded-2xl border border-stone-200 bg-white text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300 shadow-sm" />
-            </div>
-
-            <div>
-              <label className="text-stone-500 text-xs font-medium mb-2 block pl-1">
-                Был ли у тебя опыт работы с психологом или родологом?
-              </label>
-              <div className="flex gap-3">
-                {[['yes', 'Да'], ['no', 'Нет, впервые']].map(([val, label]) => (
-                  <button key={val} onClick={() => setFormHadExpert(val)}
-                    className={[
-                      'flex-1 py-3.5 rounded-2xl text-sm font-medium transition-all duration-200 border',
-                      formHadExpert === val
-                        ? 'bg-rose-400 text-white border-rose-400 shadow-md shadow-rose-100'
-                        : 'bg-white text-stone-500 border-stone-200 hover:bg-rose-50',
-                    ].join(' ')}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <button onClick={() => setScreen('thanks')} disabled={!canSubmit}
-              className={[
-                'w-full py-4 rounded-3xl font-semibold text-base transition-all duration-200 mt-2',
-                canSubmit
-                  ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
-                  : 'bg-stone-100 text-stone-300 cursor-not-allowed',
-              ].join(' ')}>
-              Подтвердить запись →
+          <div className="w-full flex flex-col gap-3 mt-auto">
+            <a href="https://t.me/assistant_username_placeholder" target="_blank" rel="noopener noreferrer"
+              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform text-center block">
+              Открыть Telegram ассистента →
+            </a>
+            <button onClick={goToStart} className="text-stone-400 text-sm py-2">
+              ← В начало
             </button>
           </div>
-        </main>
-      </>
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // ЭКРАН БЛАГОДАРНОСТИ
-  // ══════════════════════════════════════════════════════════════════════════
-  if (screen === 'thanks') return (
-    <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
-      <div className="w-20 h-20 rounded-full bg-rose-100 flex items-center justify-center mb-6 shadow-sm">
-        <span className="text-4xl">✨</span>
-      </div>
-      <h2 className="text-2xl font-semibold text-stone-700 mb-3">Отлично! Всё готово</h2>
-      <p className="text-stone-500 text-sm leading-relaxed max-w-xs mb-10">
-        Мы связались с календарём эксперта. В ближайшее время мы напишем тебе в Telegram или мессенджер для подтверждения времени.
-      </p>
-      <div className="w-full max-w-xs">
-        <button onClick={goToStart}
-          className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold shadow-md shadow-rose-200 active:scale-[0.98] transition-transform">
-          ← В начало
-        </button>
-      </div>
-    </main>
+        </div>
+      </main>
+    </>
   );
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -971,7 +916,7 @@ export default function Home() {
           </p>
 
           <div className="w-full flex flex-col gap-3 mt-auto">
-            <a href="https://t.me/placeholder" target="_blank" rel="noopener noreferrer"
+            <a href="https://t.me/channel_username_placeholder" target="_blank" rel="noopener noreferrer"
               className="w-full py-4 rounded-3xl bg-[#229ED9] text-white font-semibold text-base shadow-md active:scale-[0.98] transition-transform text-center block">
               Войти в Telegram-канал →
             </a>
