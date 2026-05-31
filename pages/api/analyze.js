@@ -27,6 +27,22 @@ const SYSTEM_PROMPT = `Ты — бережный, тёплый эксперт п
 Если готов тест:
 {"status":"ready_for_quiz","quiz_data":[{"id":1,"question":"Текст вопроса","options":["Вариант А","Вариант Б","Вариант В","Вариант Г"]}]}`;
 
+async function callClaude(userContent) {
+  const message = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4096,
+    system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content: userContent }],
+  });
+
+  const raw = message.content[0].text.trim()
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```$/i, '');
+
+  return JSON.parse(raw);
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
@@ -38,24 +54,18 @@ export default async function handler(req, res) {
       userContent += `\n\nТы уже задал уточняющий вопрос. Ответ человека:\n${clarification}\n\nТеперь обязательно генерируй тест.`;
     }
 
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: [{ role: 'user', content: userContent }],
-    });
+    let json = await callClaude(userContent);
 
-    // Убираем возможную markdown-обёртку на случай если модель всё же добавит её
-    const raw = message.content[0].text.trim()
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/i, '');
-
-    const json = JSON.parse(raw);
-
+    // Если тест пришёл неполным — перегенерируем до 2 раз, пользователь не видит
     if (json.status === 'ready_for_quiz') {
+      let attempts = 1;
+      while ((!Array.isArray(json.quiz_data) || json.quiz_data.length !== 10) && attempts < 3) {
+        console.warn(`Attempt ${attempts}: got ${json.quiz_data?.length ?? 0} questions, retrying...`);
+        json = await callClaude(userContent);
+        attempts++;
+      }
       if (!Array.isArray(json.quiz_data) || json.quiz_data.length !== 10) {
-        throw new Error(`ИИ вернул ${json.quiz_data?.length ?? 0} вопросов вместо 10`);
+        throw new Error('Не удалось сгенерировать полный тест');
       }
     }
 
