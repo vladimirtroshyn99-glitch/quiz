@@ -21,6 +21,7 @@ export default async function handler(req, res) {
       file,
       model:    'whisper-1',
       language: 'ru',
+      prompt:   'Это личный рассказ о жизненной ситуации. Родовые программы, семья, отношения, деньги, самореализация, здоровье, чувства, переживания.',
     });
 
     res.json({ text: result.text });
