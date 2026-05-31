@@ -33,6 +33,7 @@ export default function Home() {
   const [showOverlay, setShowOverlay] = useState(false);
   const [browser, setBrowser]         = useState({ isInApp: false, isAndroid: false, isIOS: false });
   const recognitionRef                = useRef(null);
+  const shouldRecordRef               = useRef(false);
 
   // ─── WebView detection ────────────────────────────────────────────────────
   useEffect(() => {
@@ -79,28 +80,52 @@ export default function Home() {
       alert('Голосовой ввод не поддерживается в этом браузере. Попробуйте Chrome.');
       return;
     }
-    const recognition = new SpeechRecognition();
-    recognition.lang           = 'ru-RU';
-    recognition.continuous     = true;
-    recognition.interimResults = false;
 
-    recognition.onresult = (e) => {
-      let chunk = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) chunk += e.results[i][0].transcript;
-      }
-      if (chunk) setText(prev => (prev ? prev + ' ' : '') + chunk.trim());
-    };
-
-    recognition.onend   = () => setIsRecording(false);
-    recognition.onerror = () => setIsRecording(false);
-
-    recognitionRef.current = recognition;
-    recognition.start();
+    shouldRecordRef.current = true;
     setIsRecording(true);
+
+    function launch() {
+      const recognition = new SpeechRecognition();
+      recognition.lang           = 'ru-RU';
+      recognition.continuous     = true;
+      recognition.interimResults = false;
+
+      recognition.onresult = (e) => {
+        let chunk = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) chunk += e.results[i][0].transcript;
+        }
+        if (chunk) setText(prev => (prev ? prev + ' ' : '') + chunk.trim());
+      };
+
+      // onend срабатывает и при паузе, и при ручной остановке.
+      // Если пользователь ещё не нажал «Стоп» — перезапускаем.
+      recognition.onend = () => {
+        if (shouldRecordRef.current) {
+          setTimeout(() => { if (shouldRecordRef.current) launch(); }, 150);
+        } else {
+          setIsRecording(false);
+        }
+      };
+
+      // 'aborted' — это мы сами вызвали .stop(), игнорируем.
+      // 'no-speech' — тишина, onend перезапустит.
+      // Остальные ошибки — реальная проблема, останавливаем.
+      recognition.onerror = (e) => {
+        if (e.error === 'aborted' || e.error === 'no-speech') return;
+        shouldRecordRef.current = false;
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+      try { recognition.start(); } catch (_) { /* already started */ }
+    }
+
+    launch();
   }
 
   function stopRecording() {
+    shouldRecordRef.current = false;
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setIsRecording(false);
