@@ -919,22 +919,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Блок 5: Куда копать */}
-          <div className="px-5 max-w-sm mx-auto mb-8">
-            <div className="bg-gradient-to-br from-stone-50 to-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-white border border-stone-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-xl">🔍</span>
-                </div>
-                <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 mb-0.5">Направление</p>
-                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Куда копать</h3>
-                </div>
-              </div>
-              <p className="text-stone-600 text-[15px] leading-[1.7]">{block5_dig}</p>
-            </div>
-          </div>
-
           {/* Кнопка ИИ-чата */}
           <div className="px-5 max-w-sm mx-auto mb-6 text-center">
             <button onClick={() => setShowChatModal(true)}
@@ -960,30 +944,37 @@ export default function Home() {
             </div>
           )}
 
-          {/* Блок action_step + финальный вопрос */}
-          {showActionStep && (
-            <div className="px-5 max-w-sm mx-auto">
-              <div className="bg-rose-50 border border-rose-100 rounded-3xl px-6 py-5 mb-5">
+          {/* Блок 5 + финальный оффер — плавно раскрываются после отправки лид-формы */}
+          <div style={{
+            maxHeight: showActionStep ? '1400px' : '0px',
+            opacity:   showActionStep ? 1 : 0,
+            overflow:  'hidden',
+            transition: 'max-height 0.75s ease-in-out, opacity 0.5s ease-in-out 0.1s',
+          }}>
+            <div className="px-5 max-w-sm mx-auto mb-4 pt-2">
+              <div className="bg-gradient-to-br from-stone-50 to-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
                 <div className="flex items-start gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center flex-shrink-0">
-                    <span className="text-xl">🌱</span>
+                  <div className="w-10 h-10 rounded-2xl bg-white border border-stone-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xl">🔍</span>
                   </div>
                   <div className="flex-1 pt-0.5">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400 mb-0.5">Первый шаг</p>
-                    <h3 className="text-rose-700 font-semibold text-[15px] leading-snug">С чего начать прямо сейчас</h3>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 mb-0.5">Направление</p>
+                    <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Куда копать</h3>
                   </div>
                 </div>
-                <p className="text-stone-700 text-[15px] leading-[1.7]">{action_step}</p>
+                <p className="text-stone-600 text-[15px] leading-[1.7]">{block5_dig}</p>
               </div>
+            </div>
 
-              <div className="bg-white rounded-3xl px-6 py-5 border border-stone-100 shadow-sm mb-8">
+            <div className="px-5 max-w-sm mx-auto mb-8">
+              <div className="bg-white rounded-3xl px-6 py-5 border border-stone-100 shadow-sm">
                 <p className="text-stone-700 font-semibold text-center text-[15px] mb-5">
-                  Хочешь записаться на разбор?
+                  Хотите записаться на разбор со специалистом?
                 </p>
                 <div className="flex flex-col gap-3">
                   <button onClick={handleYesConsultation}
                     className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform">
-                    Да, хочу записаться →
+                    Да, хочу →
                   </button>
                   <button onClick={() => { setAnswers([]); setScreen('telegram'); }}
                     className="w-full py-3 rounded-3xl text-stone-400 text-sm active:scale-[0.98] transition-transform">
@@ -992,7 +983,7 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          )}
+          </div>
 
         </main>
       </>
