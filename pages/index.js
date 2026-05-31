@@ -7,7 +7,6 @@ const TOPICS = [
   { id: 'health',    label: 'Здоровье',        emoji: '🌿' },
 ];
 
-// Сообщения для двух разных лоадеров
 const SCREEN_MESSAGES = {
   loading: [
     'Изучаю твой запрос...',
@@ -39,8 +38,7 @@ function redirectAndroidToChrome() {
 }
 
 export default function Home() {
-  // ─── State ────────────────────────────────────────────────────────────────
-  // screens: 'start' | 'input' | 'loading' | 'clarification' | 'quiz' | 'analyzing'
+  // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'
   const [screen, setScreen]                       = useState('start');
   const [topic, setTopic]                         = useState(null);
   const [text, setText]                           = useState('');
@@ -49,7 +47,11 @@ export default function Home() {
   const [quizData, setQuizData]                   = useState([]);
   const [quizIndex, setQuizIndex]                 = useState(0);
   const [answers, setAnswers]                     = useState([]);
-  const [selectedAnswer, setSelectedAnswer]       = useState(null); // индекс варианта, ожидающего авто-перехода
+  const [selectedAnswer, setSelectedAnswer]       = useState(null);
+  const [resultData, setResultData]               = useState(null);
+  const [resultPayload, setResultPayload]         = useState(null);
+  const [analyzeError, setAnalyzeError]           = useState(null);
+  const [chartsVisible, setChartsVisible]         = useState(false);
   const [displayMsg, setDisplayMsg]               = useState('');
   const [showReturnLink, setShowReturnLink]       = useState(false);
   const [isRecording, setIsRecording]             = useState(false);
@@ -74,7 +76,7 @@ export default function Home() {
     }
   }, []);
 
-  // ─── Цикличные сообщения на экранах загрузки/анализа ─────────────────────
+  // ─── Цикличные сообщения на лоадерах ─────────────────────────────────────
   useEffect(() => {
     const msgs = SCREEN_MESSAGES[screen];
     if (!msgs) return;
@@ -87,10 +89,17 @@ export default function Home() {
     return () => clearInterval(iv);
   }, [screen]);
 
-  // ─── Кнопка «В начало» на экране анализа появляется через 10 сек ─────────
+  // ─── Страховочная кнопка на экране анализа ────────────────────────────────
   useEffect(() => {
     if (screen !== 'analyzing') { setShowReturnLink(false); return; }
-    const timer = setTimeout(() => setShowReturnLink(true), 10000);
+    const timer = setTimeout(() => setShowReturnLink(true), 12000);
+    return () => clearTimeout(timer);
+  }, [screen]);
+
+  // ─── Анимация графиков при показе экрана результатов ─────────────────────
+  useEffect(() => {
+    if (screen !== 'result') { setChartsVisible(false); return; }
+    const timer = setTimeout(() => setChartsVisible(true), 300);
     return () => clearTimeout(timer);
   }, [screen]);
 
@@ -119,16 +128,19 @@ export default function Home() {
     setQuizIndex(0);
     setAnswers([]);
     setSelectedAnswer(null);
+    setResultData(null);
+    setResultPayload(null);
+    setAnalyzeError(null);
   }
 
   // ─── Логика теста ─────────────────────────────────────────────────────────
   function selectAnswer(optionIndex) {
-    if (selectedAnswer !== null) return; // защита от двойного тапа
+    if (selectedAnswer !== null) return;
     setSelectedAnswer(optionIndex);
 
     setTimeout(() => {
-      const question  = quizData[quizIndex];
-      const newAnswer = {
+      const question   = quizData[quizIndex];
+      const newAnswer  = {
         questionId:     question.id,
         question:       question.question,
         selectedOption: question.options[optionIndex],
@@ -140,9 +152,17 @@ export default function Home() {
       if (quizIndex < quizData.length - 1) {
         setQuizIndex(prev => prev + 1);
       } else {
-        // Последний вопрос — идём на экран анализа (Этап 5 сделает здесь API-запрос)
-        console.log('Ответы:', newAnswers);
+        const topicObj = TOPICS.find(t => t.id === topic);
+        const payload  = {
+          sphere:        topicObj.label,
+          query:         text,
+          clarification: clarificationText,
+          answers:       newAnswers,
+        };
+        setResultPayload(payload);
+        setAnalyzeError(null);
         setScreen('analyzing');
+        startResultGeneration(payload);
       }
     }, 380);
   }
@@ -153,9 +173,8 @@ export default function Home() {
     setQuizIndex(prev => prev - 1);
   }
 
-  // ─── Вызов Claude для анализа запроса ────────────────────────────────────
+  // ─── Claude: анализ запроса → квиз ───────────────────────────────────────
   async function callAnalyze(payload) {
-    setDisplayMsg(SCREEN_MESSAGES.loading[0]);
     setScreen('loading');
     try {
       const res  = await fetch('/api/analyze', {
@@ -190,6 +209,23 @@ export default function Home() {
   function handleClarificationAnswer() {
     const t = TOPICS.find(t => t.id === topic);
     callAnalyze({ sphere: t.label, query: text, clarification: clarificationText });
+  }
+
+  // ─── Claude: генерация разбора результатов ────────────────────────────────
+  async function startResultGeneration(payload) {
+    try {
+      const res  = await fetch('/api/result', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setResultData(data);
+      setScreen('result');
+    } catch (err) {
+      setAnalyzeError(err.message || 'Не удалось получить разбор. Попробуй ещё раз.');
+    }
   }
 
   // ─── Голосовой ввод ───────────────────────────────────────────────────────
@@ -301,7 +337,7 @@ export default function Home() {
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЭКРАН ЗАГРУЗКИ (анализ запроса перед тестом)
+  // ЛОАДЕР — анализ запроса
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'loading') return (
     <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
@@ -328,14 +364,12 @@ export default function Home() {
         {IOSOverlay}
         {InAppBanner}
         <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
-
           <div className="flex items-center justify-between mb-8">
-            <button onClick={goBack}
-              className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            <button onClick={goBack} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
               ← Назад
             </button>
             <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
-              <span className="text-base">{topicObj?.emoji}</span>
+              <span>{topicObj?.emoji}</span>
               <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
             </div>
           </div>
@@ -347,32 +381,20 @@ export default function Home() {
             </div>
           </div>
 
-          <textarea
-            value={clarificationText}
-            onChange={e => setClarificationText(e.target.value)}
+          <textarea value={clarificationText} onChange={e => setClarificationText(e.target.value)}
             placeholder="Напиши свой ответ..."
-            className="w-full max-w-sm mx-auto rounded-3xl border border-stone-200 bg-white p-5 text-stone-700 text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-rose-200 shadow-sm min-h-[160px]"
-          />
+            className="w-full max-w-sm mx-auto rounded-3xl border border-stone-200 bg-white p-5 text-stone-700 text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-rose-200 shadow-sm min-h-[160px]" />
 
           <MicRow setter={setClarificationText} />
 
           <div className="w-full max-w-sm mx-auto mt-auto">
             <button onClick={handleClarificationAnswer} disabled={!canAnswer}
-              className={[
-                'w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
-                canAnswer
-                  ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
-                  : 'bg-stone-100 text-stone-300 cursor-not-allowed',
-              ].join(' ')}>
+              className={['w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
+                canAnswer ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
+                          : 'bg-stone-100 text-stone-300 cursor-not-allowed'].join(' ')}>
               Ответить →
             </button>
-            {(isRecording || isTranscribing) && (
-              <p className="text-center text-xs text-stone-400 mt-2">
-                {isRecording ? 'Остановите запись перед ответом' : 'Подождите, идёт распознавание...'}
-              </p>
-            )}
           </div>
-
         </main>
       </>
     );
@@ -390,100 +412,208 @@ export default function Home() {
       <>
         {IOSOverlay}
         <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
-
-          {/* Шапка: назад + счётчик */}
           <div className="flex items-center justify-between mb-4">
-            {quizIndex > 0 ? (
-              <button onClick={goToPrevQuestion}
-                className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
-                ← Назад
-              </button>
-            ) : (
-              <div className="w-10" /> /* спейсер для выравнивания */
-            )}
+            {quizIndex > 0
+              ? <button onClick={goToPrevQuestion} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">← Назад</button>
+              : <div className="w-10" />}
             <span className="text-stone-400 text-sm">
               Вопрос <span className="font-medium text-stone-600">{quizIndex + 1}</span> из {total}
             </span>
-            <div className="w-10" /> {/* спейсер */}
+            <div className="w-10" />
           </div>
 
-          {/* Прогресс-бар */}
           <div className="w-full h-1.5 bg-stone-100 rounded-full mb-8">
-            <div
-              className="h-full bg-rose-300 rounded-full transition-all duration-500"
-              style={{ width: `${progressPct}%` }}
-            />
+            <div className="h-full bg-rose-300 rounded-full transition-all duration-500"
+              style={{ width: `${progressPct}%` }} />
           </div>
 
-          {/* Текст вопроса */}
           <h2 className="text-xl font-semibold text-stone-700 leading-snug mb-8 max-w-sm mx-auto">
             {question.question}
           </h2>
 
-          {/* Варианты ответов */}
           <div className="flex flex-col gap-3 w-full max-w-sm mx-auto">
             {question.options.map((option, idx) => {
               const isSelected = selectedAnswer === idx;
               return (
-                <button
-                  key={idx}
-                  onClick={() => selectAnswer(idx)}
+                <button key={idx} onClick={() => selectAnswer(idx)}
                   disabled={selectedAnswer !== null}
-                  className={[
-                    'w-full px-5 py-4 rounded-3xl text-left text-sm leading-snug transition-all duration-200 shadow-sm',
+                  className={['w-full px-5 py-4 rounded-3xl text-left text-sm leading-snug transition-all duration-200 shadow-sm',
                     isSelected
                       ? 'bg-rose-400 text-white shadow-rose-200 shadow-md scale-[1.01]'
                       : 'bg-white text-stone-600 hover:bg-rose-50 active:scale-[0.98]',
-                    selectedAnswer !== null && !isSelected ? 'opacity-50' : '',
-                  ].join(' ')}
-                >
+                    selectedAnswer !== null && !isSelected ? 'opacity-40' : '',
+                  ].join(' ')}>
                   {option}
                 </button>
               );
             })}
           </div>
-
         </main>
       </>
     );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЭКРАН АНАЛИЗА ОТВЕТОВ (лоадер перед результатами)
+  // ЛОАДЕР — анализ ответов (с обработкой ошибок)
   // ══════════════════════════════════════════════════════════════════════════
-  if (screen === 'analyzing') return (
-    <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
-      {/* Пульсирующая иконка */}
-      <div className="relative mb-8">
-        <div className="w-24 h-24 rounded-full bg-rose-100 flex items-center justify-center shadow-sm">
-          <span className="text-5xl">🌷</span>
-        </div>
-        {/* Кольца-пульс */}
-        <div className="absolute inset-0 rounded-full border-2 border-rose-200 animate-ping opacity-40" />
-        <div className="absolute inset-[-8px] rounded-full border border-rose-100 animate-ping opacity-20"
-          style={{ animationDelay: '400ms' }} />
-      </div>
-
-      <p className="text-xl font-medium text-stone-600 mb-2">{displayMsg}</p>
-      <p className="text-stone-400 text-sm mb-10">
-        Твой персональный разбор формируется...
-      </p>
-
-      <div className="flex gap-2 mb-10">
-        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
-        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '180ms' }} />
-        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '360ms' }} />
-      </div>
-
-      {/* Ссылка «В начало» появляется через 10 сек — на случай если что-то зависнет */}
-      {showReturnLink && (
-        <button onClick={goToStart}
-          className="text-stone-300 text-xs underline underline-offset-2">
-          В начало
+  if (screen === 'analyzing') {
+    if (analyzeError) return (
+      <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
+        <span className="text-5xl mb-5">🌿</span>
+        <p className="text-stone-700 font-semibold text-lg mb-2">Что-то пошло не так</p>
+        <p className="text-stone-400 text-sm leading-relaxed max-w-xs mb-8">{analyzeError}</p>
+        <button onClick={() => { setAnalyzeError(null); startResultGeneration(resultPayload); }}
+          className="w-full max-w-xs py-4 rounded-3xl bg-rose-400 text-white font-semibold shadow-md shadow-rose-200 mb-4">
+          Попробовать снова
         </button>
-      )}
-    </main>
-  );
+        <button onClick={goToStart} className="text-stone-400 text-sm">
+          ← В начало
+        </button>
+      </main>
+    );
+
+    return (
+      <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
+        <div className="relative mb-8">
+          <div className="w-24 h-24 rounded-full bg-rose-100 flex items-center justify-center shadow-sm">
+            <span className="text-5xl">🌷</span>
+          </div>
+          <div className="absolute inset-0 rounded-full border-2 border-rose-200 animate-ping opacity-40" />
+          <div className="absolute inset-[-8px] rounded-full border border-rose-100 animate-ping opacity-20"
+            style={{ animationDelay: '400ms' }} />
+        </div>
+        <p className="text-xl font-medium text-stone-600 mb-2">{displayMsg}</p>
+        <p className="text-stone-400 text-sm mb-10">Твой персональный разбор формируется...</p>
+        <div className="flex gap-2 mb-10">
+          <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '180ms' }} />
+          <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '360ms' }} />
+        </div>
+        {showReturnLink && (
+          <button onClick={goToStart} className="text-stone-300 text-xs underline underline-offset-2">
+            В начало
+          </button>
+        )}
+      </main>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН РЕЗУЛЬТАТОВ
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'result' && resultData) {
+    const { summary, pointA, pointB, ancestral_block, charts } = resultData;
+
+    function ChartBar({ label, value, colorFrom, colorTo }) {
+      return (
+        <div className="mb-5">
+          <div className="flex justify-between items-baseline mb-2">
+            <span className="text-stone-600 text-sm">{label}</span>
+            <span className="text-stone-400 text-sm font-medium">{value}%</span>
+          </div>
+          <div className="w-full h-2.5 bg-stone-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full bg-gradient-to-r ${colorFrom} ${colorTo} rounded-full transition-all duration-1000 ease-out`}
+              style={{ width: chartsVisible ? `${value}%` : '0%' }}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        {IOSOverlay}
+        <main className="min-h-screen bg-[#fdf8f4] pb-12">
+
+          {/* Шапка */}
+          <div className="px-5 pt-8 flex items-center justify-between mb-8">
+            <button onClick={goToStart} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+              ← В начало
+            </button>
+            <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+              <span>{topicObj?.emoji}</span>
+              <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+            </div>
+          </div>
+
+          {/* Вводный блок */}
+          <div className="px-5 mb-8 max-w-sm mx-auto">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0 shadow-sm">
+                <span className="text-xl">🌷</span>
+              </div>
+              <h2 className="text-lg font-semibold text-stone-700">Твой разбор готов</h2>
+            </div>
+            <p className="text-stone-500 text-sm leading-relaxed">{summary}</p>
+          </div>
+
+          <div className="px-5 max-w-sm mx-auto flex flex-col gap-4 mb-8">
+            {/* Точка А */}
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">📍</span>
+                <h3 className="text-stone-700 font-semibold text-sm">Точка А — Сейчас</h3>
+              </div>
+              <p className="text-stone-500 text-sm leading-relaxed">{pointA}</p>
+            </div>
+
+            {/* Точка Б */}
+            <div className="bg-gradient-to-br from-rose-50 to-white rounded-3xl p-5 shadow-sm border border-rose-100">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">✨</span>
+                <h3 className="text-rose-500 font-semibold text-sm">Точка Б — Потенциал</h3>
+              </div>
+              <p className="text-stone-500 text-sm leading-relaxed">{pointB}</p>
+            </div>
+
+            {/* Родовой блок */}
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-violet-100">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">🔗</span>
+                <h3 className="text-violet-500 font-semibold text-sm">Родовой сценарий</h3>
+              </div>
+              <p className="text-stone-500 text-sm leading-relaxed">{ancestral_block}</p>
+            </div>
+          </div>
+
+          {/* Диагностика */}
+          <div className="px-5 max-w-sm mx-auto mb-10">
+            <h3 className="text-stone-700 font-semibold text-sm mb-5">Диагностика рода</h3>
+            <ChartBar
+              label="Уровень родовой энергии"
+              value={charts.ancestral_energy}
+              colorFrom="from-rose-300"
+              colorTo="to-rose-400"
+            />
+            <ChartBar
+              label="Влияние неосознанных программ"
+              value={charts.program_influence}
+              colorFrom="from-violet-300"
+              colorTo="to-violet-400"
+            />
+            <ChartBar
+              label="Скрытый потенциал"
+              value={charts.resource_potential}
+              colorFrom="from-teal-300"
+              colorTo="to-teal-400"
+            />
+          </div>
+
+          {/* CTA */}
+          <div className="px-5 max-w-sm mx-auto">
+            <button
+              onClick={() => setScreen('chat')}
+              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform"
+            >
+              Обсудить разбор с ИИ-ассистентом →
+            </button>
+          </div>
+
+        </main>
+      </>
+    );
+  }
 
   // ══════════════════════════════════════════════════════════════════════════
   // ЭКРАН ВВОДА ЗАПРОСА
@@ -495,14 +625,10 @@ export default function Home() {
         {IOSOverlay}
         {InAppBanner}
         <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
-
           <div className="flex items-center justify-between mb-8">
-            <button onClick={goBack}
-              className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
-              ← Назад
-            </button>
+            <button onClick={goBack} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">← Назад</button>
             <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
-              <span className="text-base">{topicObj?.emoji}</span>
+              <span>{topicObj?.emoji}</span>
               <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
             </div>
           </div>
@@ -513,27 +639,20 @@ export default function Home() {
 
           <p className="text-stone-600 text-center text-sm leading-relaxed mb-6 max-w-sm mx-auto">
             Я помогу тебе разобраться. Чем подробнее ты опишешь, что сейчас происходит
-            в этой сфере, тем точнее ИИ сможет подсветить родовые сценарии. Можешь
-            набрать текст руками или просто надиктовать голосом.
+            в этой сфере, тем точнее ИИ сможет подсветить родовые сценарии.
           </p>
 
-          <textarea
-            value={text}
-            onChange={e => setText(e.target.value)}
+          <textarea value={text} onChange={e => setText(e.target.value)}
             placeholder="Опиши свою ситуацию..."
-            className="w-full max-w-sm mx-auto rounded-3xl border border-stone-200 bg-white p-5 text-stone-700 text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-rose-200 shadow-sm min-h-[180px]"
-          />
+            className="w-full max-w-sm mx-auto rounded-3xl border border-stone-200 bg-white p-5 text-stone-700 text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-rose-200 shadow-sm min-h-[180px]" />
 
           <MicRow setter={setText} />
 
           <div className="w-full max-w-sm mx-auto mt-auto">
             <button onClick={handleContinue} disabled={!canContinue}
-              className={[
-                'w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
-                canContinue
-                  ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
-                  : 'bg-stone-100 text-stone-300 cursor-not-allowed',
-              ].join(' ')}>
+              className={['w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
+                canContinue ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
+                            : 'bg-stone-100 text-stone-300 cursor-not-allowed'].join(' ')}>
               Продолжить →
             </button>
             {(isRecording || isTranscribing) && (
@@ -542,37 +661,32 @@ export default function Home() {
               </p>
             )}
           </div>
-
         </main>
       </>
     );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЭКРАН СТАРТА
+  // СТАРТОВЫЙ ЭКРАН
   // ══════════════════════════════════════════════════════════════════════════
   return (
     <>
       {IOSOverlay}
       {InAppBanner}
       <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center px-5 pt-12 pb-10">
-
         <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center mb-6 shadow-sm">
           <span className="text-3xl">🌷</span>
         </div>
-
         <h1 className="text-2xl font-semibold text-stone-700 text-center leading-snug mb-2">
           [Здесь будет приветствие эксперта-родолога]
         </h1>
         <p className="text-stone-400 text-sm text-center mb-10">
           Выбери тему, которая тебя волнует сейчас
         </p>
-
         <div className="w-full max-w-sm flex flex-col gap-4">
           {TOPICS.map((t) => (
             <button key={t.id} onClick={() => selectTopic(t.id)}
-              className={[
-                'w-full flex items-center gap-4 px-6 py-5 rounded-3xl text-left transition-all duration-200 shadow-sm',
+              className={['w-full flex items-center gap-4 px-6 py-5 rounded-3xl text-left transition-all duration-200 shadow-sm',
                 topic === t.id
                   ? 'bg-rose-400 text-white shadow-rose-200 shadow-md scale-[1.02]'
                   : 'bg-white text-stone-600 hover:bg-rose-50 active:scale-[0.98]',
@@ -583,7 +697,6 @@ export default function Home() {
             </button>
           ))}
         </div>
-
       </main>
     </>
   );
