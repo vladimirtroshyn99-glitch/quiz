@@ -62,6 +62,9 @@ export default function Home() {
   const [chatInput, setChatInput]                 = useState('');
   const [questionCount, setQuestionCount]         = useState(0);
   const [isChatLoading, setIsChatLoading]         = useState(false);
+  const [askedQuestions, setAskedQuestions]       = useState(new Set());
+  const [suggestedAnswers, setSuggestedAnswers]   = useState([]);
+  const [loadingQuestion, setLoadingQuestion]     = useState(null);
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
@@ -163,6 +166,9 @@ export default function Home() {
     setChatInput('');
     setQuestionCount(0);
     setIsChatLoading(false);
+    setAskedQuestions(new Set());
+    setSuggestedAnswers([]);
+    setLoadingQuestion(null);
   }
 
   // ─── Логика теста ─────────────────────────────────────────────────────────
@@ -287,6 +293,31 @@ export default function Home() {
       setChatHistory(prev => [...prev, { role: 'assistant', content: 'Ошибка соединения. Попробуй ещё раз.' }]);
     } finally {
       setIsChatLoading(false);
+    }
+  }
+
+  // ─── Инлайн-вопросы на экране результатов ────────────────────────────────
+  async function askSuggestedQuestion(question, idx) {
+    if (askedQuestions.has(idx) || loadingQuestion !== null) return;
+    setAskedQuestions(prev => new Set([...prev, idx]));
+    setLoadingQuestion(idx);
+    try {
+      const topicLabel = TOPICS.find(t => t.id === topic)?.label;
+      const ctx = { sphere: topicLabel, query: text, ...resultData };
+      const res = await fetch('/api/chat', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ history: [{ role: 'user', content: question }], context: ctx }),
+      });
+      const data = await res.json();
+      setSuggestedAnswers(prev => [...prev, {
+        question,
+        answer: data.reply || 'Что-то пошло не так.',
+      }]);
+    } catch {
+      setSuggestedAnswers(prev => [...prev, { question, answer: 'Ошибка. Попробуй ещё раз.' }]);
+    } finally {
+      setLoadingQuestion(null);
     }
   }
 
@@ -564,7 +595,7 @@ export default function Home() {
   // ЭКРАН РЕЗУЛЬТАТОВ
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'result' && resultData) {
-    const { summary, pointA, pointB, ancestral_block, charts } = resultData;
+    const { summary, current_state, desired_state, charts, suggested_questions } = resultData;
 
     function ChartBar({ label, value, colorFrom, colorTo }) {
       return (
@@ -586,7 +617,7 @@ export default function Home() {
     return (
       <>
         {IOSOverlay}
-        <main className="min-h-screen bg-[#fdf8f4] pb-12">
+        <main className="min-h-screen bg-[#fdf8f4] pb-16">
 
           {/* Шапка */}
           <div className="px-5 pt-8 flex items-center justify-between mb-8">
@@ -600,7 +631,7 @@ export default function Home() {
           </div>
 
           {/* Вводный блок */}
-          <div className="px-5 mb-8 max-w-sm mx-auto">
+          <div className="px-5 mb-6 max-w-sm mx-auto">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0 shadow-sm">
                 <span className="text-xl">🌷</span>
@@ -610,67 +641,97 @@ export default function Home() {
             <p className="text-stone-500 text-sm leading-relaxed">{summary}</p>
           </div>
 
+          {/* Карточки разбора */}
           <div className="px-5 max-w-sm mx-auto flex flex-col gap-4 mb-8">
-            {/* Точка А */}
             <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">📍</span>
-                <h3 className="text-stone-700 font-semibold text-sm">Точка А — Сейчас</h3>
+                <span className="text-xl">💭</span>
+                <h3 className="text-stone-700 font-semibold text-sm">Что сейчас происходит</h3>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{pointA}</p>
+              <p className="text-stone-500 text-sm leading-relaxed">{current_state}</p>
             </div>
 
-            {/* Точка Б */}
             <div className="bg-gradient-to-br from-rose-50 to-white rounded-3xl p-5 shadow-sm border border-rose-100">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xl">✨</span>
-                <h3 className="text-rose-500 font-semibold text-sm">Точка Б — Потенциал</h3>
+                <h3 className="text-rose-500 font-semibold text-sm">Куда ты идёшь</h3>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{pointB}</p>
-            </div>
-
-            {/* Родовой блок */}
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-violet-100">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">🔗</span>
-                <h3 className="text-violet-500 font-semibold text-sm">Родовой сценарий</h3>
-              </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{ancestral_block}</p>
+              <p className="text-stone-500 text-sm leading-relaxed">{desired_state}</p>
             </div>
           </div>
 
           {/* Диагностика */}
-          <div className="px-5 max-w-sm mx-auto mb-10">
+          <div className="px-5 max-w-sm mx-auto mb-8">
             <h3 className="text-stone-700 font-semibold text-sm mb-5">Диагностика рода</h3>
-            <ChartBar
-              label="Уровень родовой энергии"
-              value={charts.ancestral_energy}
-              colorFrom="from-rose-300"
-              colorTo="to-rose-400"
-            />
-            <ChartBar
-              label="Влияние неосознанных программ"
-              value={charts.program_influence}
-              colorFrom="from-violet-300"
-              colorTo="to-violet-400"
-            />
-            <ChartBar
-              label="Скрытый потенциал"
-              value={charts.resource_potential}
-              colorFrom="from-teal-300"
-              colorTo="to-teal-400"
-            />
+            <ChartBar label="Уровень родовой энергии" value={charts.ancestral_energy} colorFrom="from-rose-300" colorTo="to-rose-400" />
+            <ChartBar label="Влияние неосознанных программ" value={charts.program_influence} colorFrom="from-violet-300" colorTo="to-violet-400" />
+            <ChartBar label="Скрытый потенциал" value={charts.resource_potential} colorFrom="from-teal-300" colorTo="to-teal-400" />
           </div>
 
-          {/* CTA */}
-          <div className="px-5 max-w-sm mx-auto">
-            <button
-              onClick={() => { setChatHistory([]); setQuestionCount(0); setChatInput(''); setScreen('chat'); }}
-              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform"
-            >
-              Обсудить разбор с ИИ-ассистентом →
+          {/* Главные CTA */}
+          <div className="px-5 max-w-sm mx-auto flex flex-col gap-3 mb-8">
+            <button onClick={() => setScreen('assistant')}
+              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform leading-snug">
+              Записаться на разбор →
+            </button>
+            <button onClick={() => setScreen('telegram')}
+              className="w-full py-4 rounded-3xl bg-white text-stone-500 font-medium text-sm border border-stone-200 active:scale-[0.98] transition-transform shadow-sm">
+              Изучить тему самостоятельно
             </button>
           </div>
+
+          {/* Опциональный чат */}
+          {suggested_questions?.length > 0 && (
+            <div className="px-5 max-w-sm mx-auto">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex-1 h-px bg-stone-200" />
+                <p className="text-stone-400 text-xs whitespace-nowrap">Спроси у ИИ-родолога</p>
+                <div className="flex-1 h-px bg-stone-200" />
+              </div>
+              <p className="text-stone-500 text-xs text-center mb-4 leading-relaxed">
+                Нажми на любой вопрос, чтобы получить ответ
+              </p>
+
+              <div className="flex flex-col gap-2 mb-4">
+                {suggested_questions.map((q, i) => {
+                  const isAsked   = askedQuestions.has(i);
+                  const isLoading = loadingQuestion === i;
+                  return (
+                    <button key={i} onClick={() => askSuggestedQuestion(q, i)}
+                      disabled={isAsked || loadingQuestion !== null}
+                      className={[
+                        'w-full px-4 py-3.5 rounded-2xl text-left text-sm leading-snug transition-all border',
+                        isAsked
+                          ? 'bg-stone-50 text-stone-300 border-stone-100 cursor-default'
+                          : loadingQuestion !== null
+                          ? 'bg-white text-stone-300 border-stone-100 cursor-not-allowed'
+                          : 'bg-white text-stone-600 border-stone-200 hover:bg-rose-50 hover:border-rose-200 active:scale-[0.98] shadow-sm',
+                      ].join(' ')}>
+                      {isLoading ? (
+                        <span className="flex items-center gap-2 text-rose-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-300 animate-pulse inline-block" />
+                          Думаю...
+                        </span>
+                      ) : (
+                        <span>💬 {q}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {suggestedAnswers.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  {suggestedAnswers.map((item, i) => (
+                    <div key={i} className="bg-white rounded-3xl rounded-tl-md p-4 border border-stone-100 shadow-sm">
+                      <p className="text-xs text-rose-400 mb-2 leading-snug">💬 {item.question}</p>
+                      <p className="text-stone-600 text-sm leading-relaxed whitespace-pre-wrap">{item.answer}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
         </main>
       </>
