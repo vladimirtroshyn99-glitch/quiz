@@ -892,13 +892,13 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Ссылка на ИИ-чат */}
-          <div className="px-5 max-w-sm mx-auto mb-6 text-center">
+          {/* Кнопка ИИ-чата скрыта — раскомментировать при необходимости */}
+          {/* <div className="px-5 max-w-sm mx-auto mb-6 text-center">
             <button onClick={() => setShowChatModal(true)}
               className="text-rose-400 text-sm underline underline-offset-2 hover:text-rose-500 transition-colors">
               💬 Задать вопрос ИИ-родологу
             </button>
-          </div>
+          </div> */}
 
           {/* Главные CTA (скрыты после отправки формы) */}
           {!showActionStep && (
