@@ -29,11 +29,12 @@ export default function Home() {
   const [screen, setScreen]           = useState('start'); // 'start' | 'input' | 'result'
   const [topic, setTopic]             = useState(null);
   const [text, setText]               = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [browser, setBrowser]         = useState({ isInApp: false, isAndroid: false, isIOS: false });
-  const recognitionRef                = useRef(null);
-  const shouldRecordRef               = useRef(false);
+  const [isRecording, setIsRecording]     = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [showOverlay, setShowOverlay]     = useState(false);
+  const [browser, setBrowser]             = useState({ isInApp: false, isAndroid: false, isIOS: false });
+  const mediaRecorderRef                  = useRef(null);
+  const chunksRef                         = useRef([]);
 
   // ─── WebView detection ────────────────────────────────────────────────────
   useEffect(() => {
@@ -59,6 +60,7 @@ export default function Home() {
 
   function goBack() {
     stopRecording();
+    setIsTranscribing(false);
     setScreen('start');
   }
 
@@ -73,67 +75,63 @@ export default function Home() {
     setText('');
   }
 
-  // ─── Голосовой ввод ───────────────────────────────────────────────────────
-  function startRecording() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert('Голосовой ввод не поддерживается в этом браузере. Попробуйте Chrome.');
-      return;
+  // ─── Голосовой ввод через MediaRecorder + Whisper ────────────────────────
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      const recorder = new MediaRecorder(stream, { mimeType });
+
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop()); // освобождаем микрофон
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        await transcribeBlob(blob, mimeType);
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch {
+      alert('Не удалось получить доступ к микрофону. Проверь разрешения в браузере.');
     }
-
-    shouldRecordRef.current = true;
-    setIsRecording(true);
-
-    function launch() {
-      const recognition = new SpeechRecognition();
-      recognition.lang           = 'ru-RU';
-      recognition.continuous     = true;
-      recognition.interimResults = false;
-
-      recognition.onresult = (e) => {
-        let chunk = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          if (e.results[i].isFinal) chunk += e.results[i][0].transcript;
-        }
-        if (chunk) setText(prev => (prev ? prev + ' ' : '') + chunk.trim());
-      };
-
-      // onend срабатывает и при паузе, и при ручной остановке.
-      // Если пользователь ещё не нажал «Стоп» — перезапускаем.
-      recognition.onend = () => {
-        if (shouldRecordRef.current) {
-          setTimeout(() => { if (shouldRecordRef.current) launch(); }, 150);
-        } else {
-          setIsRecording(false);
-        }
-      };
-
-      // 'aborted' — это мы сами вызвали .stop(), игнорируем.
-      // 'no-speech' — тишина, onend перезапустит.
-      // Остальные ошибки — реальная проблема, останавливаем.
-      recognition.onerror = (e) => {
-        if (e.error === 'aborted' || e.error === 'no-speech') return;
-        shouldRecordRef.current = false;
-        setIsRecording(false);
-      };
-
-      recognitionRef.current = recognition;
-      try { recognition.start(); } catch (_) { /* already started */ }
-    }
-
-    launch();
   }
 
   function stopRecording() {
-    shouldRecordRef.current = false;
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
     setIsRecording(false);
   }
 
+  async function transcribeBlob(blob, mimeType) {
+    setIsTranscribing(true);
+    try {
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.readAsDataURL(blob);
+      });
+
+      const res  = await fetch('/api/transcribe', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ audio: base64, mimeType }),
+      });
+      const data = await res.json();
+      if (data.text) setText(prev => (prev ? prev + ' ' : '') + data.text.trim());
+      if (data.error) alert(data.error);
+    } catch {
+      alert('Ошибка отправки аудио. Проверь соединение.');
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
   // ─── Переиспользуемые блоки ───────────────────────────────────────────────
-  const topicObj   = TOPICS.find(t => t.id === topic);
-  const canContinue = text.trim().length > 0 && !isRecording;
+  const topicObj    = TOPICS.find(t => t.id === topic);
+  const canContinue = text.trim().length > 0 && !isRecording && !isTranscribing;
 
   const IOSOverlay = showOverlay && (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -227,7 +225,12 @@ export default function Home() {
 
         {/* Кнопка микрофона */}
         <div className="flex justify-center mt-4 mb-8">
-          {!isRecording ? (
+          {isTranscribing ? (
+            <div className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-stone-50 border border-stone-200 text-stone-400 text-sm font-medium">
+              <span className="w-2 h-2 rounded-full bg-rose-300 animate-pulse inline-block" />
+              Распознаём...
+            </div>
+          ) : !isRecording ? (
             <button onClick={startRecording}
               className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-white border border-stone-200 text-stone-500 text-sm font-medium shadow-sm hover:bg-rose-50 hover:border-rose-200 transition-all active:scale-[0.97]">
               <span className="text-lg">🎙️</span>
@@ -237,20 +240,13 @@ export default function Home() {
             <button onClick={stopRecording}
               className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-stone-100 border border-stone-200 text-stone-500 text-sm font-medium shadow-sm active:scale-[0.97]">
               <span className="w-3 h-3 rounded-sm bg-stone-400 inline-block flex-shrink-0" />
-              Остановить запись
+              Остановить и распознать
               <span className="w-2 h-2 rounded-full bg-rose-300 animate-pulse inline-block flex-shrink-0" />
             </button>
           )}
         </div>
 
         {/* Кнопка Продолжить */}
-        {/*
-          canContinue = text.trim() > 0 AND NOT isRecording
-          Логика блокировки:
-          - пусто → disabled (нечего отправлять)
-          - идёт запись → disabled (не прерывать диктовку на полуслове)
-          - есть текст + запись остановлена → активна
-        */}
         <div className="w-full max-w-sm mx-auto mt-auto">
           <button
             onClick={handleContinue}
@@ -264,9 +260,9 @@ export default function Home() {
           >
             Продолжить →
           </button>
-          {isRecording && (
+          {(isRecording || isTranscribing) && (
             <p className="text-center text-xs text-stone-400 mt-2">
-              Сначала остановите запись
+              {isRecording ? 'Остановите запись перед продолжением' : 'Подождите, идёт распознавание...'}
             </p>
           )}
         </div>
