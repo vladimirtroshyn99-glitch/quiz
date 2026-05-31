@@ -38,7 +38,7 @@ function redirectAndroidToChrome() {
 }
 
 export default function Home() {
-  // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'
+  // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'|'chat'
   const [screen, setScreen]                       = useState('start');
   const [topic, setTopic]                         = useState(null);
   const [text, setText]                           = useState('');
@@ -58,8 +58,13 @@ export default function Home() {
   const [isTranscribing, setIsTranscribing]       = useState(false);
   const [showOverlay, setShowOverlay]             = useState(false);
   const [browser, setBrowser]                     = useState({ isInApp: false, isAndroid: false, isIOS: false });
+  const [chatHistory, setChatHistory]             = useState([]);
+  const [chatInput, setChatInput]                 = useState('');
+  const [questionCount, setQuestionCount]         = useState(0);
+  const [isChatLoading, setIsChatLoading]         = useState(false);
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
+  const messagesEndRef                            = useRef(null);
 
   // ─── WebView detection ────────────────────────────────────────────────────
   useEffect(() => {
@@ -103,6 +108,29 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [screen]);
 
+  // ─── Авто-скролл в чате ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (screen !== 'chat') return;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, isChatLoading, screen]);
+
+  // ─── Открытие чата: загружаем приветственное сообщение ───────────────────
+  useEffect(() => {
+    if (screen !== 'chat' || chatHistory.length > 0) return;
+    const topicLabel = TOPICS.find(t => t.id === topic)?.label;
+    const ctx = { sphere: topicLabel, query: text, ...resultData };
+    setIsChatLoading(true);
+    fetch('/api/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ history: [], context: ctx }),
+    })
+      .then(r => r.json())
+      .then(d => setChatHistory([{ role: 'assistant', content: d.reply || 'Привет! О чём хотелось бы поговорить?' }]))
+      .catch(() => setChatHistory([{ role: 'assistant', content: 'Привет! О чём хотелось бы поговорить?' }]))
+      .finally(() => setIsChatLoading(false));
+  }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Навигация ────────────────────────────────────────────────────────────
   function selectTopic(id) {
     setTopic(id);
@@ -131,6 +159,10 @@ export default function Home() {
     setResultData(null);
     setResultPayload(null);
     setAnalyzeError(null);
+    setChatHistory([]);
+    setChatInput('');
+    setQuestionCount(0);
+    setIsChatLoading(false);
   }
 
   // ─── Логика теста ─────────────────────────────────────────────────────────
@@ -225,6 +257,36 @@ export default function Home() {
       setScreen('result');
     } catch (err) {
       setAnalyzeError(err.message || 'Не удалось получить разбор. Попробуй ещё раз.');
+    }
+  }
+
+  // ─── Чат: отправка сообщения ──────────────────────────────────────────────
+  async function sendChatMessage() {
+    if (!chatInput.trim() || isChatLoading || questionCount >= 3) return;
+    const newCount = questionCount + 1;
+    const userMsg  = { role: 'user', content: chatInput.trim() };
+    const newHist  = [...chatHistory, userMsg];
+    setChatHistory(newHist);
+    setChatInput('');
+    setQuestionCount(newCount);
+    setIsChatLoading(true);
+    try {
+      const topicLabel = TOPICS.find(t => t.id === topic)?.label;
+      const ctx = { sphere: topicLabel, query: text, ...resultData };
+      const res = await fetch('/api/chat', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ history: newHist, context: ctx, isLast: newCount >= 3 }),
+      });
+      const data = await res.json();
+      setChatHistory(prev => [...prev, {
+        role: 'assistant',
+        content: data.reply || 'Что-то пошло не так. Попробуй ещё раз.',
+      }]);
+    } catch {
+      setChatHistory(prev => [...prev, { role: 'assistant', content: 'Ошибка соединения. Попробуй ещё раз.' }]);
+    } finally {
+      setIsChatLoading(false);
     }
   }
 
@@ -603,7 +665,7 @@ export default function Home() {
           {/* CTA */}
           <div className="px-5 max-w-sm mx-auto">
             <button
-              onClick={() => setScreen('chat')}
+              onClick={() => { setChatHistory([]); setQuestionCount(0); setChatInput(''); setScreen('chat'); }}
               className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform"
             >
               Обсудить разбор с ИИ-ассистентом →
@@ -612,6 +674,114 @@ export default function Home() {
 
         </main>
       </>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН ЧАТА
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'chat') {
+    const limitReached = questionCount >= 3;
+    const showCta      = limitReached && !isChatLoading;
+
+    return (
+      <main className="h-screen bg-[#fdf8f4] flex flex-col overflow-hidden">
+
+        {/* Шапка */}
+        <div className="flex-shrink-0 px-5 pt-8 pb-4 flex items-center justify-between border-b border-stone-100 bg-[#fdf8f4]">
+          <button onClick={() => setScreen('result')}
+            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            ← Назад
+          </button>
+          <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+            <span>{topicObj?.emoji}</span>
+            <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+          </div>
+        </div>
+
+        {/* Аватар */}
+        <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3 border-b border-stone-100 bg-[#fdf8f4]">
+          <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shadow-sm flex-shrink-0">
+            <span className="text-xl">🌷</span>
+          </div>
+          <div>
+            <p className="text-stone-700 text-sm font-medium">ИИ-ассистент</p>
+            <p className="text-stone-400 text-xs">Родовой разбор</p>
+          </div>
+        </div>
+
+        {/* Лента сообщений */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+          {chatHistory.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={[
+                'max-w-[85%] px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap',
+                msg.role === 'user'
+                  ? 'bg-rose-400 text-white rounded-3xl rounded-tr-md'
+                  : 'bg-white text-stone-600 border border-stone-100 shadow-sm rounded-3xl rounded-tl-md',
+              ].join(' ')}>
+                {msg.content}
+              </div>
+            </div>
+          ))}
+
+          {isChatLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white border border-stone-100 shadow-sm px-5 py-4 rounded-3xl rounded-tl-md flex gap-1.5 items-center">
+                <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* CTA после 3 вопросов */}
+        {showCta && (
+          <div className="flex-shrink-0 px-5 pt-2 pb-3 bg-[#fdf8f4]">
+            <button
+              onClick={() => setScreen('offer')}
+              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform"
+            >
+              Узнать, что делать дальше →
+            </button>
+          </div>
+        )}
+
+        {/* Поле ввода */}
+        <div className="flex-shrink-0 px-4 py-3 bg-white border-t border-stone-100">
+          {limitReached ? (
+            <div className="w-full px-4 py-3 rounded-2xl bg-stone-50 text-stone-300 text-sm text-center border border-stone-100">
+              Лимит бесплатных вопросов исчерпан
+            </div>
+          ) : (
+            <div className="flex gap-2 items-end">
+              <textarea
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
+                placeholder="Задай вопрос по разбору..."
+                disabled={isChatLoading}
+                rows={1}
+                className="flex-1 px-4 py-3 rounded-2xl border border-stone-200 bg-stone-50 text-stone-700 text-sm resize-none focus:outline-none focus:border-rose-200 placeholder-stone-300 disabled:opacity-40 max-h-28 overflow-y-auto"
+              />
+              <button
+                onClick={sendChatMessage}
+                disabled={!chatInput.trim() || isChatLoading}
+                className="w-11 h-11 rounded-2xl bg-rose-400 text-white flex items-center justify-center flex-shrink-0 shadow-sm active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+
+      </main>
     );
   }
 
