@@ -7,6 +7,13 @@ const TOPICS = [
   { id: 'health',    label: 'Здоровье',        emoji: '🌿' },
 ];
 
+const QUIZ_OPTIONS = [
+  'Прям в точку',
+  'Отчасти',
+  'Раньше было, сейчас меньше',
+  'Не совсем про меня',
+];
+
 const SCREEN_MESSAGES = {
   loading: [
     'Изучаю твой запрос...',
@@ -17,7 +24,7 @@ const SCREEN_MESSAGES = {
   analyzing: [
     'Анализирую твои ответы...',
     'Сопоставляю с родовыми сценариями...',
-    'Формирую карту точек А и Б...',
+    'Ищу корневые нити...',
     'Уже почти готово...',
   ],
 };
@@ -197,7 +204,7 @@ export default function Home() {
       const newAnswer  = {
         questionId:     question.id,
         question:       question.question,
-        selectedOption: question.options[optionIndex],
+        selectedOption: QUIZ_OPTIONS[optionIndex],
       };
       const newAnswers = [...answers, newAnswer];
       setAnswers(newAnswers);
@@ -558,7 +565,7 @@ export default function Home() {
           </h2>
 
           <div className="flex flex-col gap-3 w-full max-w-sm mx-auto">
-            {question.options.map((option, idx) => {
+            {QUIZ_OPTIONS.map((option, idx) => {
               const isSelected = selectedAnswer === idx;
               return (
                 <button key={idx} onClick={() => selectAnswer(idx)}
@@ -628,23 +635,13 @@ export default function Home() {
   // ЭКРАН РЕЗУЛЬТАТОВ
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'result' && resultData) {
-    const { summary, current_state, desired_state, charts, suggested_questions, cta_button_targeted, action_step } = resultData;
+    const {
+      block1_see, block2_want, chart_gap,
+      block3_hold, chart_root,
+      block4_lose, block5_dig,
+      suggested_questions, cta_button_targeted, action_step,
+    } = resultData;
     const canSubmitLead = leadTelegram.trim() && leadPhone.trim() && consentData && consentMarketing;
-
-    function ChartBar({ label, value, colorFrom, colorTo }) {
-      return (
-        <div className="mb-5">
-          <div className="flex justify-between items-baseline mb-2">
-            <span className="text-stone-600 text-sm">{label}</span>
-            <span className="text-stone-400 text-sm font-medium">{value}%</span>
-          </div>
-          <div className="w-full h-2.5 bg-stone-100 rounded-full overflow-hidden">
-            <div className={`h-full bg-gradient-to-r ${colorFrom} ${colorTo} rounded-full transition-all duration-1000 ease-out`}
-              style={{ width: chartsVisible ? `${value}%` : '0%' }} />
-          </div>
-        </div>
-      );
-    }
 
     return (
       <>
@@ -770,41 +767,129 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Вводный блок */}
+          {/* Заголовок */}
           <div className="px-5 mb-6 max-w-sm mx-auto">
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0 shadow-sm">
                 <span className="text-xl">🌷</span>
               </div>
               <h2 className="text-lg font-semibold text-stone-700">Твой разбор готов</h2>
             </div>
-            <p className="text-stone-500 text-sm leading-relaxed">{summary}</p>
           </div>
 
-          {/* Карточки разбора */}
-          <div className="px-5 max-w-sm mx-auto flex flex-col gap-4 mb-8">
+          {/* Блок 1: Вот что я вижу */}
+          <div className="px-5 max-w-sm mx-auto mb-4">
             <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-xl">💭</span>
-                <h3 className="text-stone-700 font-semibold text-sm">Что сейчас происходит</h3>
+                <span className="text-xl">🪞</span>
+                <h3 className="text-stone-700 font-semibold text-sm">Вот что я вижу</h3>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{current_state}</p>
+              <p className="text-stone-500 text-sm leading-relaxed">{block1_see}</p>
             </div>
+          </div>
+
+          {/* Блок 2: Вот чего ты на самом деле хочешь */}
+          <div className="px-5 max-w-sm mx-auto mb-4">
             <div className="bg-gradient-to-br from-rose-50 to-white rounded-3xl p-5 shadow-sm border border-rose-100">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xl">✨</span>
-                <h3 className="text-rose-500 font-semibold text-sm">Куда ты идёшь</h3>
+                <h3 className="text-rose-500 font-semibold text-sm">Вот чего ты на самом деле хочешь</h3>
               </div>
-              <p className="text-stone-500 text-sm leading-relaxed">{desired_state}</p>
+              <p className="text-stone-500 text-sm leading-relaxed">{block2_want}</p>
             </div>
           </div>
 
-          {/* Диагностика */}
+          {/* Визуализация «Разрыв» */}
+          <div className="px-5 max-w-sm mx-auto mb-6">
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
+              <p className="text-stone-400 text-xs uppercase tracking-wide text-center mb-5">Разрыв между реальностью и желаемым</p>
+              <div className="mb-4">
+                <div className="flex justify-between text-xs text-stone-400 mb-2">
+                  <span>Где сейчас</span>
+                  <span className="font-medium">{chart_gap.current}%</span>
+                </div>
+                <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-stone-300 rounded-full transition-all duration-1000 ease-out"
+                    style={{ width: chartsVisible ? `${chart_gap.current}%` : '0%' }} />
+                </div>
+              </div>
+              <div className="mb-5">
+                <div className="flex justify-between text-xs text-rose-400 mb-2">
+                  <span>Где хочу быть</span>
+                  <span className="font-medium">{chart_gap.desired}%</span>
+                </div>
+                <div className="w-full h-3 bg-rose-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-rose-400 rounded-full transition-all duration-1000 ease-out"
+                    style={{ width: chartsVisible ? `${chart_gap.desired}%` : '0%', transitionDelay: '300ms' }} />
+                </div>
+              </div>
+              <div className="text-center pt-3 border-t border-stone-100">
+                <span className="text-stone-400 text-xs">Разрыв: </span>
+                <span className="text-base font-bold text-rose-500">{chart_gap.desired - chart_gap.current}%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Блок 3: Вот что тебя держит */}
+          <div className="px-5 max-w-sm mx-auto mb-4">
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">⚓</span>
+                <h3 className="text-stone-700 font-semibold text-sm">Вот что тебя держит</h3>
+              </div>
+              <p className="text-stone-500 text-sm leading-relaxed">{block3_hold}</p>
+            </div>
+          </div>
+
+          {/* Визуализация «Корень» */}
+          <div className="px-5 max-w-sm mx-auto mb-6">
+            <div className="flex flex-col items-center">
+              <div className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-5 py-4">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <div className="w-2 h-2 rounded-full bg-stone-300 flex-shrink-0" />
+                  <span className="text-xs text-stone-400 uppercase tracking-wide">Снаружи</span>
+                </div>
+                <p className="text-stone-500 text-sm">{chart_root.surface}</p>
+              </div>
+              <div className="w-px h-4 bg-gradient-to-b from-stone-200 to-rose-200" />
+              <div className="w-full bg-rose-50 border border-rose-100 rounded-2xl px-5 py-4">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <div className="w-2 h-2 rounded-full bg-rose-300 flex-shrink-0" />
+                  <span className="text-xs text-rose-400 uppercase tracking-wide">Глубже</span>
+                </div>
+                <p className="text-stone-600 text-sm">{chart_root.deep}</p>
+              </div>
+              <div className="w-px h-4 bg-gradient-to-b from-rose-200 to-rose-400" />
+              <div className="w-full bg-gradient-to-br from-rose-100 to-rose-50 border border-rose-200 rounded-2xl px-5 py-5">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-base">🌱</span>
+                  <span className="text-xs text-rose-500 uppercase tracking-wide font-semibold">Родовой корень</span>
+                </div>
+                <p className="text-stone-700 text-sm font-medium">{chart_root.root}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Блок 4: Вот что ты теряешь */}
+          <div className="px-5 max-w-sm mx-auto mb-4">
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-amber-100">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">⏳</span>
+                <h3 className="text-stone-700 font-semibold text-sm">Вот что ты теряешь</h3>
+              </div>
+              <p className="text-stone-500 text-sm leading-relaxed">{block4_lose}</p>
+            </div>
+          </div>
+
+          {/* Блок 5: Куда копать */}
           <div className="px-5 max-w-sm mx-auto mb-8">
-            <h3 className="text-stone-700 font-semibold text-sm mb-5">Диагностика рода</h3>
-            <ChartBar label="Уровень родовой энергии" value={charts.ancestral_energy} colorFrom="from-rose-300" colorTo="to-rose-400" />
-            <ChartBar label="Влияние неосознанных программ" value={charts.program_influence} colorFrom="from-violet-300" colorTo="to-violet-400" />
-            <ChartBar label="Скрытый потенциал" value={charts.resource_potential} colorFrom="from-teal-300" colorTo="to-teal-400" />
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-xl">🔍</span>
+                <h3 className="text-stone-700 font-semibold text-sm">Куда копать</h3>
+              </div>
+              <p className="text-stone-500 text-sm leading-relaxed">{block5_dig}</p>
+            </div>
           </div>
 
           {/* Ссылка на ИИ-чат */}
@@ -831,7 +916,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* Блок action_step + финальный вопрос (после отправки формы) */}
+          {/* Блок action_step + финальный вопрос */}
           {showActionStep && (
             <div className="px-5 max-w-sm mx-auto">
               <div className="bg-rose-50 border border-rose-100 rounded-3xl p-5 mb-5">
@@ -851,7 +936,7 @@ export default function Home() {
                     className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform">
                     Да, хочу записаться →
                   </button>
-                  <button onClick={() => setScreen('telegram')}
+                  <button onClick={() => { setAnswers([]); setScreen('telegram'); }}
                     className="w-full py-3 rounded-3xl text-stone-400 text-sm active:scale-[0.98] transition-transform">
                     Нет, удалите мои ответы
                   </button>
@@ -1039,7 +1124,7 @@ export default function Home() {
       {IOSOverlay}
       <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
         <div className="flex items-center mb-10">
-          <button onClick={() => setScreen('offer')}
+          <button onClick={() => setScreen(resultData ? 'result' : 'offer')}
             className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
             ← Назад
           </button>
@@ -1086,7 +1171,7 @@ export default function Home() {
       {IOSOverlay}
       <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
         <div className="flex items-center mb-10">
-          <button onClick={() => setScreen('offer')}
+          <button onClick={() => setScreen(resultData ? 'result' : 'offer')}
             className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
             ← Назад
           </button>
