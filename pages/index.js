@@ -78,6 +78,7 @@ export default function Home() {
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
+  const revealSectionRef                          = useRef(null);
 
   // ─── WebView detection ────────────────────────────────────────────────────
   useEffect(() => {
@@ -329,6 +330,7 @@ export default function Home() {
     setLeadSubmitting(false);
     setShowLeadModal(false);
     setShowActionStep(true);
+    setTimeout(() => revealSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   }
 
   // ─── "Да, хочу на разбор": уведомляем Vakas и переходим ─────────────────
@@ -941,7 +943,7 @@ export default function Home() {
           )}
 
           {/* Блок 5 + финальный оффер — плавно раскрываются после отправки лид-формы */}
-          <div style={{
+          <div ref={revealSectionRef} style={{
             maxHeight: showActionStep ? '1400px' : '0px',
             opacity:   showActionStep ? 1 : 0,
             overflow:  'hidden',
