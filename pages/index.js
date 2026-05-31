@@ -65,6 +65,14 @@ export default function Home() {
   const [askedQuestions, setAskedQuestions]       = useState(new Set());
   const [suggestedAnswers, setSuggestedAnswers]   = useState([]);
   const [loadingQuestion, setLoadingQuestion]     = useState(null);
+  const [showChatModal, setShowChatModal]         = useState(false);
+  const [showLeadModal, setShowLeadModal]         = useState(false);
+  const [leadTelegram, setLeadTelegram]           = useState('');
+  const [leadPhone, setLeadPhone]                 = useState('');
+  const [consentData, setConsentData]             = useState(false);
+  const [consentMarketing, setConsentMarketing]   = useState(false);
+  const [leadSubmitting, setLeadSubmitting]       = useState(false);
+  const [showActionStep, setShowActionStep]       = useState(false);
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
@@ -169,6 +177,14 @@ export default function Home() {
     setAskedQuestions(new Set());
     setSuggestedAnswers([]);
     setLoadingQuestion(null);
+    setShowChatModal(false);
+    setShowLeadModal(false);
+    setLeadTelegram('');
+    setLeadPhone('');
+    setConsentData(false);
+    setConsentMarketing(false);
+    setLeadSubmitting(false);
+    setShowActionStep(false);
   }
 
   // ─── Логика теста ─────────────────────────────────────────────────────────
@@ -294,6 +310,23 @@ export default function Home() {
     } finally {
       setIsChatLoading(false);
     }
+  }
+
+  // ─── Лид-форма: отправка в Vakas ─────────────────────────────────────────
+  async function submitLeadForm() {
+    if (leadSubmitting) return;
+    setLeadSubmitting(true);
+    try {
+      const topicLabel = TOPICS.find(t => t.id === topic)?.label;
+      await fetch('/api/vakas', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ telegram: leadTelegram, phone: leadPhone, sphere: topicLabel, query: text }),
+      });
+    } catch { /* fail silently — не блокируем UX */ }
+    setLeadSubmitting(false);
+    setShowLeadModal(false);
+    setShowActionStep(true);
   }
 
   // ─── Инлайн-вопросы на экране результатов ────────────────────────────────
@@ -595,7 +628,8 @@ export default function Home() {
   // ЭКРАН РЕЗУЛЬТАТОВ
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'result' && resultData) {
-    const { summary, current_state, desired_state, charts, suggested_questions } = resultData;
+    const { summary, current_state, desired_state, charts, suggested_questions, cta_button_targeted, action_step } = resultData;
+    const canSubmitLead = leadTelegram.trim() && leadPhone.trim() && consentData && consentMarketing;
 
     function ChartBar({ label, value, colorFrom, colorTo }) {
       return (
@@ -605,10 +639,8 @@ export default function Home() {
             <span className="text-stone-400 text-sm font-medium">{value}%</span>
           </div>
           <div className="w-full h-2.5 bg-stone-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full bg-gradient-to-r ${colorFrom} ${colorTo} rounded-full transition-all duration-1000 ease-out`}
-              style={{ width: chartsVisible ? `${value}%` : '0%' }}
-            />
+            <div className={`h-full bg-gradient-to-r ${colorFrom} ${colorTo} rounded-full transition-all duration-1000 ease-out`}
+              style={{ width: chartsVisible ? `${value}%` : '0%' }} />
           </div>
         </div>
       );
@@ -617,6 +649,114 @@ export default function Home() {
     return (
       <>
         {IOSOverlay}
+
+        {/* ── Попап: ИИ-чат ─────────────────────────────────────────────── */}
+        {showChatModal && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end justify-center p-4"
+            onClick={e => { if (e.target === e.currentTarget) setShowChatModal(false); }}>
+            <div className="w-full max-w-sm bg-[#fdf8f4] rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+              style={{ maxHeight: '82vh' }}>
+              <div className="flex justify-between items-center px-5 py-4 border-b border-stone-100 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🌷</span>
+                  <span className="font-semibold text-stone-700 text-sm">ИИ-родолог</span>
+                </div>
+                <button onClick={() => setShowChatModal(false)}
+                  className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-stone-400 text-sm hover:bg-stone-200 transition-colors">
+                  ✕
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5">
+                {suggestedAnswers.length === 0 && (
+                  <p className="text-stone-400 text-xs text-center mb-4">Нажми на вопрос, чтобы получить ответ</p>
+                )}
+                <div className="flex flex-col gap-2 mb-4">
+                  {suggested_questions?.map((q, i) => {
+                    const isAsked   = askedQuestions.has(i);
+                    const isLoading = loadingQuestion === i;
+                    return (
+                      <button key={i} onClick={() => askSuggestedQuestion(q, i)}
+                        disabled={isAsked || loadingQuestion !== null}
+                        className={[
+                          'w-full px-4 py-3.5 rounded-2xl text-left text-sm leading-snug transition-all border',
+                          isAsked
+                            ? 'bg-stone-50 text-stone-300 border-stone-100 cursor-default'
+                            : loadingQuestion !== null
+                            ? 'bg-white text-stone-300 border-stone-100 cursor-not-allowed'
+                            : 'bg-white text-stone-600 border-stone-200 hover:bg-rose-50 hover:border-rose-200 active:scale-[0.98] shadow-sm',
+                        ].join(' ')}>
+                        {isLoading
+                          ? <span className="flex items-center gap-2 text-rose-400"><span className="w-1.5 h-1.5 rounded-full bg-rose-300 animate-pulse inline-block" />Думаю...</span>
+                          : <span>💬 {q}</span>
+                        }
+                      </button>
+                    );
+                  })}
+                </div>
+                {suggestedAnswers.map((item, i) => (
+                  <div key={i} className="bg-white rounded-3xl rounded-tl-md p-4 border border-stone-100 shadow-sm mb-3">
+                    <p className="text-xs text-rose-400 mb-2 leading-snug">💬 {item.question}</p>
+                    <p className="text-stone-600 text-sm leading-relaxed whitespace-pre-wrap">{item.answer}</p>
+                  </div>
+                ))}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Попап: лид-форма ──────────────────────────────────────────── */}
+        {showLeadModal && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end justify-center p-4"
+            onClick={e => { if (e.target === e.currentTarget) setShowLeadModal(false); }}>
+            <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
+              style={{ maxHeight: '92vh', overflowY: 'auto' }}>
+              <div className="flex justify-between items-center px-5 py-4 border-b border-stone-100">
+                <h3 className="font-semibold text-stone-700">Получить рекомендацию</h3>
+                {!leadSubmitting && (
+                  <button onClick={() => setShowLeadModal(false)}
+                    className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-stone-400 text-sm">✕</button>
+                )}
+              </div>
+              <div className="p-5 flex flex-col gap-4">
+                <p className="text-stone-500 text-sm leading-relaxed">
+                  Оставь контакты — и мы пришлём тебе конкретный первый шаг с чего начать
+                </p>
+                <input type="text" value={leadTelegram} onChange={e => setLeadTelegram(e.target.value)}
+                  placeholder="Ваш ник в Telegram (@username)"
+                  className="w-full px-4 py-3.5 rounded-2xl border border-stone-200 bg-stone-50 text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300" />
+                <input type="tel" value={leadPhone} onChange={e => setLeadPhone(e.target.value)}
+                  placeholder="Ваш телефон"
+                  className="w-full px-4 py-3.5 rounded-2xl border border-stone-200 bg-stone-50 text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300" />
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={consentData} onChange={e => setConsentData(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-rose-400" />
+                  <span className="text-stone-400 text-xs leading-relaxed">
+                    Я даю <a href="https://ifpp-inc.ru/soglasie1" target="_blank" rel="noopener noreferrer" className="text-rose-400 underline">согласие на обработку персональных данных</a> в соответствии с <a href="https://ifpp-inc.ru/politikanew" target="_blank" rel="noopener noreferrer" className="text-rose-400 underline">Политикой обработки персональных данных</a>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={consentMarketing} onChange={e => setConsentMarketing(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-rose-400" />
+                  <span className="text-stone-400 text-xs leading-relaxed">
+                    Я даю <a href="https://ifpp-inc.ru/soglasie2" target="_blank" rel="noopener noreferrer" className="text-rose-400 underline">согласие на получение рекламных рассылок</a>
+                  </span>
+                </label>
+                <button onClick={submitLeadForm} disabled={!canSubmitLead || leadSubmitting}
+                  className={[
+                    'w-full py-4 rounded-3xl font-semibold text-base transition-all',
+                    canSubmitLead && !leadSubmitting
+                      ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
+                      : 'bg-stone-100 text-stone-300 cursor-not-allowed',
+                  ].join(' ')}>
+                  {leadSubmitting ? 'Отправляем...' : 'Получить рекомендацию →'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Основной экран ────────────────────────────────────────────── */}
         <main className="min-h-screen bg-[#fdf8f4] pb-16">
 
           {/* Шапка */}
@@ -650,7 +790,6 @@ export default function Home() {
               </div>
               <p className="text-stone-500 text-sm leading-relaxed">{current_state}</p>
             </div>
-
             <div className="bg-gradient-to-br from-rose-50 to-white rounded-3xl p-5 shadow-sm border border-rose-100">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-xl">✨</span>
@@ -668,68 +807,56 @@ export default function Home() {
             <ChartBar label="Скрытый потенциал" value={charts.resource_potential} colorFrom="from-teal-300" colorTo="to-teal-400" />
           </div>
 
-          {/* Главные CTA */}
-          <div className="px-5 max-w-sm mx-auto flex flex-col gap-3 mb-8">
-            <button onClick={() => setScreen('assistant')}
-              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform leading-snug">
-              Записаться на разбор →
-            </button>
-            <button onClick={() => setScreen('telegram')}
-              className="w-full py-4 rounded-3xl bg-white text-stone-500 font-medium text-sm border border-stone-200 active:scale-[0.98] transition-transform shadow-sm">
-              Изучить тему самостоятельно
+          {/* Ссылка на ИИ-чат */}
+          <div className="px-5 max-w-sm mx-auto mb-6 text-center">
+            <button onClick={() => setShowChatModal(true)}
+              className="text-rose-400 text-sm underline underline-offset-2 hover:text-rose-500 transition-colors">
+              💬 Задать вопрос ИИ-родологу
             </button>
           </div>
 
-          {/* Опциональный чат */}
-          {suggested_questions?.length > 0 && (
-            <div className="px-5 max-w-sm mx-auto">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="flex-1 h-px bg-stone-200" />
-                <p className="text-stone-400 text-xs whitespace-nowrap">Спроси у ИИ-родолога</p>
-                <div className="flex-1 h-px bg-stone-200" />
-              </div>
-              <p className="text-stone-500 text-xs text-center mb-4 leading-relaxed">
-                Нажми на любой вопрос, чтобы получить ответ
-              </p>
-
-              <div className="flex flex-col gap-2 mb-4">
-                {suggested_questions.map((q, i) => {
-                  const isAsked   = askedQuestions.has(i);
-                  const isLoading = loadingQuestion === i;
-                  return (
-                    <button key={i} onClick={() => askSuggestedQuestion(q, i)}
-                      disabled={isAsked || loadingQuestion !== null}
-                      className={[
-                        'w-full px-4 py-3.5 rounded-2xl text-left text-sm leading-snug transition-all border',
-                        isAsked
-                          ? 'bg-stone-50 text-stone-300 border-stone-100 cursor-default'
-                          : loadingQuestion !== null
-                          ? 'bg-white text-stone-300 border-stone-100 cursor-not-allowed'
-                          : 'bg-white text-stone-600 border-stone-200 hover:bg-rose-50 hover:border-rose-200 active:scale-[0.98] shadow-sm',
-                      ].join(' ')}>
-                      {isLoading ? (
-                        <span className="flex items-center gap-2 text-rose-400">
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-300 animate-pulse inline-block" />
-                          Думаю...
-                        </span>
-                      ) : (
-                        <span>💬 {q}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {suggestedAnswers.length > 0 && (
-                <div className="flex flex-col gap-3">
-                  {suggestedAnswers.map((item, i) => (
-                    <div key={i} className="bg-white rounded-3xl rounded-tl-md p-4 border border-stone-100 shadow-sm">
-                      <p className="text-xs text-rose-400 mb-2 leading-snug">💬 {item.question}</p>
-                      <p className="text-stone-600 text-sm leading-relaxed whitespace-pre-wrap">{item.answer}</p>
-                    </div>
-                  ))}
-                </div>
+          {/* Главные CTA (скрыты после отправки формы) */}
+          {!showActionStep && (
+            <div className="px-5 max-w-sm mx-auto flex flex-col gap-3 mb-8">
+              <button onClick={() => setShowLeadModal(true)}
+                className="w-full py-4 rounded-3xl bg-white text-stone-600 font-medium text-sm border border-stone-200 active:scale-[0.98] transition-transform shadow-sm leading-snug text-left px-5">
+                Как выйти из этой ситуации сегодня?
+              </button>
+              {cta_button_targeted && (
+                <button onClick={() => setShowLeadModal(true)}
+                  className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform leading-snug px-5 text-left">
+                  {cta_button_targeted}
+                </button>
               )}
+            </div>
+          )}
+
+          {/* Блок action_step + финальный вопрос (после отправки формы) */}
+          {showActionStep && (
+            <div className="px-5 max-w-sm mx-auto">
+              <div className="bg-rose-50 border border-rose-100 rounded-3xl p-5 mb-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">🌱</span>
+                  <h3 className="text-rose-600 font-semibold text-sm">С чего начать прямо сейчас</h3>
+                </div>
+                <p className="text-stone-600 text-sm leading-relaxed">{action_step}</p>
+              </div>
+
+              <div className="bg-white rounded-3xl p-5 border border-stone-100 shadow-sm mb-8">
+                <p className="text-stone-700 font-semibold text-center text-base mb-4">
+                  Хочешь записаться на разбор?
+                </p>
+                <div className="flex flex-col gap-3">
+                  <button onClick={() => setScreen('assistant')}
+                    className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform">
+                    Да, хочу записаться →
+                  </button>
+                  <button onClick={() => setScreen('telegram')}
+                    className="w-full py-3 rounded-3xl text-stone-400 text-sm active:scale-[0.98] transition-transform">
+                    Нет, удалите мои ответы
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
