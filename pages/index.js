@@ -38,7 +38,7 @@ function redirectAndroidToChrome() {
 }
 
 export default function Home() {
-  // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'|'chat'
+  // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'|'chat'|'offer'|'form'|'thanks'|'telegram'
   const [screen, setScreen]                       = useState('start');
   const [topic, setTopic]                         = useState(null);
   const [text, setText]                           = useState('');
@@ -62,6 +62,9 @@ export default function Home() {
   const [chatInput, setChatInput]                 = useState('');
   const [questionCount, setQuestionCount]         = useState(0);
   const [isChatLoading, setIsChatLoading]         = useState(false);
+  const [formName, setFormName]                   = useState('');
+  const [formContact, setFormContact]             = useState('');
+  const [formHadExpert, setFormHadExpert]         = useState(null);
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
@@ -163,6 +166,9 @@ export default function Home() {
     setChatInput('');
     setQuestionCount(0);
     setIsChatLoading(false);
+    setFormName('');
+    setFormContact('');
+    setFormHadExpert(null);
   }
 
   // ─── Логика теста ─────────────────────────────────────────────────────────
@@ -784,6 +790,199 @@ export default function Home() {
       </main>
     );
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН РАЗВИЛКИ
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'offer') return (
+    <>
+      {IOSOverlay}
+      <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+        <div className="flex items-center justify-between mb-10">
+          <button onClick={() => setScreen('chat')}
+            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            ← Назад
+          </button>
+          <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+            <span>{topicObj?.emoji}</span>
+            <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col max-w-sm mx-auto w-full flex-1">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-5 shadow-sm">
+              <span className="text-3xl">🌱</span>
+            </div>
+            <h2 className="text-2xl font-semibold text-stone-700 leading-snug mb-4">
+              Твой родовой сценарий<br />поддаётся проработке
+            </h2>
+            <p className="text-stone-500 text-sm leading-relaxed">
+              ИИ подсветил верхушку айсберга. Чтобы навсегда убрать этот блок из жизни, нужен точечный разбор со специалистом.
+            </p>
+          </div>
+
+          {resultData?.ancestral_block && (
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-rose-50 mb-8">
+              <p className="text-xs text-stone-400 uppercase tracking-wide mb-3">Что стоит за твоей ситуацией</p>
+              <div className="flex items-start gap-3">
+                <span className="text-xl flex-shrink-0">🔗</span>
+                <p className="text-stone-600 text-sm leading-relaxed italic">
+                  «{resultData.ancestral_block.split('.')[0]}»
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 mt-auto">
+            <button onClick={() => setScreen('form')}
+              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform leading-snug">
+              Записаться на бесплатную<br />сессию-разбор →
+            </button>
+            <button onClick={() => setScreen('telegram')}
+              className="w-full py-4 rounded-3xl bg-white text-stone-500 font-medium text-sm border border-stone-200 active:scale-[0.98] transition-transform shadow-sm">
+              Я пока хочу изучить тему самостоятельно
+            </button>
+          </div>
+        </div>
+      </main>
+    </>
+  );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН ЛИД-ФОРМЫ
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'form') {
+    const canSubmit = formName.trim().length > 0 && formContact.trim().length > 0 && formHadExpert !== null;
+    return (
+      <>
+        {IOSOverlay}
+        <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+          <div className="flex items-center justify-between mb-8">
+            <button onClick={() => setScreen('offer')}
+              className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+              ← Назад
+            </button>
+            <span className="text-stone-500 text-sm font-medium">Запись на сессию</span>
+            <div className="w-16" />
+          </div>
+
+          <div className="max-w-sm mx-auto w-full flex flex-col gap-5">
+            <div className="text-center mb-2">
+              <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-4 shadow-sm">
+                <span className="text-2xl">🌷</span>
+              </div>
+              <h2 className="text-xl font-semibold text-stone-700 mb-2">Оставь свои контакты</h2>
+              <p className="text-stone-400 text-xs leading-relaxed">Эксперт свяжется с тобой для подтверждения времени</p>
+            </div>
+
+            <div>
+              <label className="text-stone-500 text-xs font-medium mb-1.5 block pl-1">Как тебя зовут?</label>
+              <input type="text" value={formName} onChange={e => setFormName(e.target.value)}
+                placeholder="Твоё имя"
+                className="w-full px-5 py-4 rounded-2xl border border-stone-200 bg-white text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300 shadow-sm" />
+            </div>
+
+            <div>
+              <label className="text-stone-500 text-xs font-medium mb-1.5 block pl-1">Telegram @username или номер телефона</label>
+              <input type="text" value={formContact} onChange={e => setFormContact(e.target.value)}
+                placeholder="@username или +7..."
+                className="w-full px-5 py-4 rounded-2xl border border-stone-200 bg-white text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300 shadow-sm" />
+            </div>
+
+            <div>
+              <label className="text-stone-500 text-xs font-medium mb-2 block pl-1">
+                Был ли у тебя опыт работы с психологом или родологом?
+              </label>
+              <div className="flex gap-3">
+                {[['yes', 'Да'], ['no', 'Нет, впервые']].map(([val, label]) => (
+                  <button key={val} onClick={() => setFormHadExpert(val)}
+                    className={[
+                      'flex-1 py-3.5 rounded-2xl text-sm font-medium transition-all duration-200 border',
+                      formHadExpert === val
+                        ? 'bg-rose-400 text-white border-rose-400 shadow-md shadow-rose-100'
+                        : 'bg-white text-stone-500 border-stone-200 hover:bg-rose-50',
+                    ].join(' ')}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={() => setScreen('thanks')} disabled={!canSubmit}
+              className={[
+                'w-full py-4 rounded-3xl font-semibold text-base transition-all duration-200 mt-2',
+                canSubmit
+                  ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
+                  : 'bg-stone-100 text-stone-300 cursor-not-allowed',
+              ].join(' ')}>
+              Подтвердить запись →
+            </button>
+          </div>
+        </main>
+      </>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН БЛАГОДАРНОСТИ
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'thanks') return (
+    <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
+      <div className="w-20 h-20 rounded-full bg-rose-100 flex items-center justify-center mb-6 shadow-sm">
+        <span className="text-4xl">✨</span>
+      </div>
+      <h2 className="text-2xl font-semibold text-stone-700 mb-3">Отлично! Всё готово</h2>
+      <p className="text-stone-500 text-sm leading-relaxed max-w-xs mb-10">
+        Мы связались с календарём эксперта. В ближайшее время мы напишем тебе в Telegram или мессенджер для подтверждения времени.
+      </p>
+      <div className="w-full max-w-xs">
+        <button onClick={goToStart}
+          className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold shadow-md shadow-rose-200 active:scale-[0.98] transition-transform">
+          ← В начало
+        </button>
+      </div>
+    </main>
+  );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН TELEGRAM-КАНАЛА
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'telegram') return (
+    <>
+      {IOSOverlay}
+      <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+        <div className="flex items-center mb-10">
+          <button onClick={() => setScreen('offer')}
+            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            ← Назад
+          </button>
+        </div>
+
+        <div className="flex flex-col items-center text-center max-w-sm mx-auto w-full flex-1">
+          <div className="w-20 h-20 rounded-full bg-[#e8f4fd] flex items-center justify-center mb-6 shadow-sm">
+            <span className="text-4xl">✈️</span>
+          </div>
+          <h2 className="text-2xl font-semibold text-stone-700 mb-3 leading-snug">
+            Добро пожаловать<br />в сообщество
+          </h2>
+          <p className="text-stone-500 text-sm leading-relaxed max-w-xs mb-10">
+            Отличный выбор! В нашем сообществе мы регулярно разбираем родовые программы, делимся практиками и поддерживаем друг друга.
+          </p>
+
+          <div className="w-full flex flex-col gap-3 mt-auto">
+            <a href="https://t.me/placeholder" target="_blank" rel="noopener noreferrer"
+              className="w-full py-4 rounded-3xl bg-[#229ED9] text-white font-semibold text-base shadow-md active:scale-[0.98] transition-transform text-center block">
+              Войти в Telegram-канал →
+            </a>
+            <button onClick={goToStart} className="text-stone-400 text-sm py-2">
+              ← В начало
+            </button>
+          </div>
+        </div>
+      </main>
+    </>
+  );
 
   // ══════════════════════════════════════════════════════════════════════════
   // ЭКРАН ВВОДА ЗАПРОСА
