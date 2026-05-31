@@ -919,7 +919,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Кнопка ИИ-чата */}
+          {/* Кнопка ИИ-чата — скрыта, раскомментировать если нужно
           <div className="px-5 max-w-sm mx-auto mb-6 text-center">
             <button onClick={() => setShowChatModal(true)}
               className="inline-flex items-center gap-2 text-rose-400 text-sm hover:text-rose-500 transition-colors">
@@ -927,6 +927,7 @@ export default function Home() {
               <span className="underline underline-offset-2">Задать вопрос ИИ-родологу</span>
             </button>
           </div>
+          */}
 
           {/* Главные CTA (скрыты после отправки формы) */}
           {!showActionStep && (
