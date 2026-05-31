@@ -7,12 +7,7 @@ const TOPICS = [
   { id: 'health',    label: 'Здоровье',        emoji: '🌿' },
 ];
 
-const QUIZ_OPTIONS = [
-  'Прям в точку',
-  'Отчасти',
-  'Раньше было, сейчас меньше',
-  'Не совсем про меня',
-];
+// QUIZ_OPTIONS удалены — варианты ответов теперь динамические из question.options
 
 const SCREEN_MESSAGES = {
   loading: [
@@ -203,8 +198,8 @@ export default function Home() {
       const question   = quizData[quizIndex];
       const newAnswer  = {
         questionId:     question.id,
-        question:       question.question,
-        selectedOption: QUIZ_OPTIONS[optionIndex],
+        question:       question.question_text,
+        selectedOption: question.options[optionIndex],
       };
       const newAnswers = [...answers, newAnswer];
       setAnswers(newAnswers);
@@ -580,11 +575,11 @@ export default function Home() {
           </div>
 
           <h2 className="text-xl font-semibold text-stone-700 leading-snug mb-8 max-w-sm mx-auto">
-            {question.question}
+            {question.question_text}
           </h2>
 
           <div className="flex flex-col gap-3 w-full max-w-sm mx-auto">
-            {QUIZ_OPTIONS.map((option, idx) => {
+            {question.options.map((option, idx) => {
               const isSelected = selectedAnswer === idx;
               return (
                 <button key={idx} onClick={() => selectAnswer(idx)}
