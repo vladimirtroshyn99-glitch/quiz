@@ -7,12 +7,21 @@ const TOPICS = [
   { id: 'health',    label: 'Здоровье',        emoji: '🌿' },
 ];
 
-const LOADING_MSGS = [
-  'Изучаю твой запрос...',
-  'Сверяюсь с паттернами рода...',
-  'Ищу нити твоей истории...',
-  'Готовлю вопросы для тебя...',
-];
+// Сообщения для двух разных лоадеров
+const SCREEN_MESSAGES = {
+  loading: [
+    'Изучаю твой запрос...',
+    'Сверяюсь с паттернами рода...',
+    'Ищу нити твоей истории...',
+    'Готовлю вопросы для тебя...',
+  ],
+  analyzing: [
+    'Анализирую твои ответы...',
+    'Сопоставляю с родовыми сценариями...',
+    'Формирую карту точек А и Б...',
+    'Уже почти готово...',
+  ],
+};
 
 function detectInAppBrowser() {
   if (typeof navigator === 'undefined') return { isInApp: false, isAndroid: false, isIOS: false };
@@ -30,21 +39,25 @@ function redirectAndroidToChrome() {
 }
 
 export default function Home() {
-  // ─── State ────────────────────────────────────────────────────────────��───
-  // screens: 'start' | 'input' | 'loading' | 'clarification' | 'quiz_preview'
-  const [screen, setScreen]                   = useState('start');
-  const [topic, setTopic]                     = useState(null);
-  const [text, setText]                       = useState('');
+  // ─── State ────────────────────────────────────────────────────────────────
+  // screens: 'start' | 'input' | 'loading' | 'clarification' | 'quiz' | 'analyzing'
+  const [screen, setScreen]                       = useState('start');
+  const [topic, setTopic]                         = useState(null);
+  const [text, setText]                           = useState('');
   const [clarificationText, setClarificationText] = useState('');
-  const [aiQuestion, setAiQuestion]           = useState('');
-  const [quizData, setQuizData]               = useState([]);
-  const [loadingMsg, setLoadingMsg]           = useState(LOADING_MSGS[0]);
-  const [isRecording, setIsRecording]         = useState(false);
-  const [isTranscribing, setIsTranscribing]   = useState(false);
-  const [showOverlay, setShowOverlay]         = useState(false);
-  const [browser, setBrowser]                 = useState({ isInApp: false, isAndroid: false, isIOS: false });
-  const mediaRecorderRef                      = useRef(null);
-  const chunksRef                             = useRef([]);
+  const [aiQuestion, setAiQuestion]               = useState('');
+  const [quizData, setQuizData]                   = useState([]);
+  const [quizIndex, setQuizIndex]                 = useState(0);
+  const [answers, setAnswers]                     = useState([]);
+  const [selectedAnswer, setSelectedAnswer]       = useState(null); // индекс варианта, ожидающего авто-перехода
+  const [displayMsg, setDisplayMsg]               = useState('');
+  const [showReturnLink, setShowReturnLink]       = useState(false);
+  const [isRecording, setIsRecording]             = useState(false);
+  const [isTranscribing, setIsTranscribing]       = useState(false);
+  const [showOverlay, setShowOverlay]             = useState(false);
+  const [browser, setBrowser]                     = useState({ isInApp: false, isAndroid: false, isIOS: false });
+  const mediaRecorderRef                          = useRef(null);
+  const chunksRef                                 = useRef([]);
 
   // ─── WebView detection ────────────────────────────────────────────────────
   useEffect(() => {
@@ -61,15 +74,24 @@ export default function Home() {
     }
   }, []);
 
-  // ─── Цикличные сообщения на экране загрузки ───────────────────────────────
+  // ─── Цикличные сообщения на экранах загрузки/анализа ─────────────────────
   useEffect(() => {
-    if (screen !== 'loading') return;
+    const msgs = SCREEN_MESSAGES[screen];
+    if (!msgs) return;
+    setDisplayMsg(msgs[0]);
     let i = 0;
     const iv = setInterval(() => {
-      i = (i + 1) % LOADING_MSGS.length;
-      setLoadingMsg(LOADING_MSGS[i]);
-    }, 2200);
+      i = (i + 1) % msgs.length;
+      setDisplayMsg(msgs[i]);
+    }, 2800);
     return () => clearInterval(iv);
+  }, [screen]);
+
+  // ─── Кнопка «В начало» на экране анализа появляется через 10 сек ─────────
+  useEffect(() => {
+    if (screen !== 'analyzing') { setShowReturnLink(false); return; }
+    const timer = setTimeout(() => setShowReturnLink(true), 10000);
+    return () => clearTimeout(timer);
   }, [screen]);
 
   // ─── Навигация ────────────────────────────────────────────────────────────
@@ -82,11 +104,8 @@ export default function Home() {
   function goBack() {
     stopRecording();
     setIsTranscribing(false);
-    if (screen === 'clarification') {
-      setScreen('input');
-    } else {
-      setScreen('start');
-    }
+    if (screen === 'clarification') setScreen('input');
+    else setScreen('start');
   }
 
   function goToStart() {
@@ -97,11 +116,46 @@ export default function Home() {
     setClarificationText('');
     setAiQuestion('');
     setQuizData([]);
+    setQuizIndex(0);
+    setAnswers([]);
+    setSelectedAnswer(null);
   }
 
-  // ─── Вызов Claude для анализа ─────────────────────────────────────────────
+  // ─── Логика теста ─────────────────────────────────────────────────────────
+  function selectAnswer(optionIndex) {
+    if (selectedAnswer !== null) return; // защита от двойного тапа
+    setSelectedAnswer(optionIndex);
+
+    setTimeout(() => {
+      const question  = quizData[quizIndex];
+      const newAnswer = {
+        questionId:     question.id,
+        question:       question.question,
+        selectedOption: question.options[optionIndex],
+      };
+      const newAnswers = [...answers, newAnswer];
+      setAnswers(newAnswers);
+      setSelectedAnswer(null);
+
+      if (quizIndex < quizData.length - 1) {
+        setQuizIndex(prev => prev + 1);
+      } else {
+        // Последний вопрос — идём на экран анализа (Этап 5 сделает здесь API-запрос)
+        console.log('Ответы:', newAnswers);
+        setScreen('analyzing');
+      }
+    }, 380);
+  }
+
+  function goToPrevQuestion() {
+    if (quizIndex === 0 || selectedAnswer !== null) return;
+    setAnswers(prev => prev.slice(0, -1));
+    setQuizIndex(prev => prev - 1);
+  }
+
+  // ─── Вызов Claude для анализа запроса ────────────────────────────────────
   async function callAnalyze(payload) {
-    setLoadingMsg(LOADING_MSGS[0]);
+    setDisplayMsg(SCREEN_MESSAGES.loading[0]);
     setScreen('loading');
     try {
       const res  = await fetch('/api/analyze', {
@@ -118,7 +172,9 @@ export default function Home() {
         setScreen('clarification');
       } else if (data.status === 'ready_for_quiz') {
         setQuizData(data.quiz_data);
-        setScreen('quiz_preview');
+        setQuizIndex(0);
+        setAnswers([]);
+        setScreen('quiz');
       }
     } catch (err) {
       alert(err.message || 'Что-то пошло не так. Попробуй ещё раз.');
@@ -136,7 +192,7 @@ export default function Home() {
     callAnalyze({ sphere: t.label, query: text, clarification: clarificationText });
   }
 
-  // ─── Голосовой ввод (MediaRecorder → Whisper) ─────────────────────────────
+  // ─── Голосовой ввод ───────────────────────────────────────────────────────
   async function startRecording(setter) {
     try {
       const stream   = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -188,10 +244,9 @@ export default function Home() {
     }
   }
 
-  // ─── Переиспользуемые элементы ────────────────────────────────────────────
+  // ─── Переиспользуемые блоки ───────────────────────────────────────────────
   const topicObj = TOPICS.find(t => t.id === topic);
 
-  // Кнопка микрофона — принимает setter (куда писать текст) и флаг активности кнопки Далее
   function MicRow({ setter }) {
     return (
       <div className="flex justify-center mt-4 mb-6">
@@ -245,17 +300,15 @@ export default function Home() {
     </div>
   );
 
-  // ═════════════════════════���════════════════════════════════════════════════
-  // ЭКРАН ЗАГРУЗКИ
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН ЗАГРУЗКИ (анализ запроса перед тестом)
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'loading') return (
     <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
       <div className="w-20 h-20 rounded-full bg-rose-100 flex items-center justify-center mb-8 shadow-sm animate-pulse">
         <span className="text-4xl">🌷</span>
       </div>
-      <p className="text-xl font-medium text-stone-600 mb-2 transition-all duration-500">
-        {loadingMsg}
-      </p>
+      <p className="text-xl font-medium text-stone-600 mb-2">{displayMsg}</p>
       <p className="text-stone-400 text-sm mb-8">Это займёт несколько секунд</p>
       <div className="flex gap-2">
         <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -287,7 +340,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Карточка с вопросом от ИИ */}
           <div className="w-full max-w-sm mx-auto bg-white rounded-3xl p-5 shadow-sm border border-rose-50 mb-6">
             <div className="flex items-start gap-3">
               <span className="text-2xl flex-shrink-0">🌷</span>
@@ -305,23 +357,19 @@ export default function Home() {
           <MicRow setter={setClarificationText} />
 
           <div className="w-full max-w-sm mx-auto mt-auto">
-            <button
-              onClick={handleClarificationAnswer}
-              disabled={!canAnswer}
+            <button onClick={handleClarificationAnswer} disabled={!canAnswer}
               className={[
                 'w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
                 canAnswer
                   ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
                   : 'bg-stone-100 text-stone-300 cursor-not-allowed',
-              ].join(' ')}
-            >
+              ].join(' ')}>
               Ответить →
             </button>
-            {isRecording && (
-              <p className="text-center text-xs text-stone-400 mt-2">Остановите запись перед ответом</p>
-            )}
-            {isTranscribing && (
-              <p className="text-center text-xs text-stone-400 mt-2">Подождите, идёт распознавание...</p>
+            {(isRecording || isTranscribing) && (
+              <p className="text-center text-xs text-stone-400 mt-2">
+                {isRecording ? 'Остановите запись перед ответом' : 'Подождите, идёт распознавание...'}
+              </p>
             )}
           </div>
 
@@ -331,60 +379,110 @@ export default function Home() {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЭКРАН ПРЕВЬЮ ТЕСТА
+  // ЭКРАН ТЕСТА — пошаговый
   // ══════════════════════════════════════════════════════════════════════════
-  if (screen === 'quiz_preview') return (
-    <>
-      {IOSOverlay}
-      <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+  if (screen === 'quiz') {
+    const question    = quizData[quizIndex];
+    const total       = quizData.length;
+    const progressPct = (quizIndex / total) * 100;
 
-        <div className="flex items-center justify-between mb-6">
-          <button onClick={goToStart}
-            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
-            ← В начало
-          </button>
-          <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
-            <span className="text-base">{topicObj?.emoji}</span>
-            <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+    return (
+      <>
+        {IOSOverlay}
+        <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+
+          {/* Шапка: назад + счётчик */}
+          <div className="flex items-center justify-between mb-4">
+            {quizIndex > 0 ? (
+              <button onClick={goToPrevQuestion}
+                className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+                ← Назад
+              </button>
+            ) : (
+              <div className="w-10" /> /* спейсер для выравнивания */
+            )}
+            <span className="text-stone-400 text-sm">
+              Вопрос <span className="font-medium text-stone-600">{quizIndex + 1}</span> из {total}
+            </span>
+            <div className="w-10" /> {/* спейсер */}
           </div>
-        </div>
 
-        <div className="w-full max-w-sm mx-auto mb-6 text-center">
-          <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-3 shadow-sm">
-            <span className="text-2xl">✨</span>
+          {/* Прогресс-бар */}
+          <div className="w-full h-1.5 bg-stone-100 rounded-full mb-8">
+            <div
+              className="h-full bg-rose-300 rounded-full transition-all duration-500"
+              style={{ width: `${progressPct}%` }}
+            />
           </div>
-          <h2 className="text-lg font-semibold text-stone-700">Твой персональный тест готов</h2>
-          <p className="text-stone-400 text-xs mt-1">Предпросмотр вопросов — интерактивный тест будет на следующем этапе</p>
-        </div>
 
-        <div className="w-full max-w-sm mx-auto flex flex-col gap-4">
-          {quizData.map((q, idx) => (
-            <div key={q.id} className="bg-white rounded-3xl p-5 shadow-sm border border-stone-100">
-              <p className="text-stone-700 text-sm font-medium mb-3 leading-snug">
-                <span className="text-rose-300 font-bold mr-1">{idx + 1}.</span>
-                {q.question}
-              </p>
-              <ul className="flex flex-col gap-2">
-                {q.options.map((opt, i) => (
-                  <li key={i}
-                    className="text-stone-500 text-xs leading-snug bg-stone-50 rounded-2xl px-4 py-2 border border-stone-100">
-                    {opt}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+          {/* Текст вопроса */}
+          <h2 className="text-xl font-semibold text-stone-700 leading-snug mb-8 max-w-sm mx-auto">
+            {question.question}
+          </h2>
 
-        <div className="w-full max-w-sm mx-auto mt-8">
-          <button onClick={goToStart}
-            className="w-full py-4 rounded-3xl bg-white border border-stone-200 text-stone-500 font-medium text-sm shadow-sm active:scale-[0.98] transition-transform">
-            ← В начало
-          </button>
-        </div>
+          {/* Варианты ответов */}
+          <div className="flex flex-col gap-3 w-full max-w-sm mx-auto">
+            {question.options.map((option, idx) => {
+              const isSelected = selectedAnswer === idx;
+              return (
+                <button
+                  key={idx}
+                  onClick={() => selectAnswer(idx)}
+                  disabled={selectedAnswer !== null}
+                  className={[
+                    'w-full px-5 py-4 rounded-3xl text-left text-sm leading-snug transition-all duration-200 shadow-sm',
+                    isSelected
+                      ? 'bg-rose-400 text-white shadow-rose-200 shadow-md scale-[1.01]'
+                      : 'bg-white text-stone-600 hover:bg-rose-50 active:scale-[0.98]',
+                    selectedAnswer !== null && !isSelected ? 'opacity-50' : '',
+                  ].join(' ')}
+                >
+                  {option}
+                </button>
+              );
+            })}
+          </div>
 
-      </main>
-    </>
+        </main>
+      </>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН АНАЛИЗА ОТВЕТОВ (лоадер перед результатами)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'analyzing') return (
+    <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
+      {/* Пульсирующая иконка */}
+      <div className="relative mb-8">
+        <div className="w-24 h-24 rounded-full bg-rose-100 flex items-center justify-center shadow-sm">
+          <span className="text-5xl">🌷</span>
+        </div>
+        {/* Кольца-пульс */}
+        <div className="absolute inset-0 rounded-full border-2 border-rose-200 animate-ping opacity-40" />
+        <div className="absolute inset-[-8px] rounded-full border border-rose-100 animate-ping opacity-20"
+          style={{ animationDelay: '400ms' }} />
+      </div>
+
+      <p className="text-xl font-medium text-stone-600 mb-2">{displayMsg}</p>
+      <p className="text-stone-400 text-sm mb-10">
+        Твой персональный разбор формируется...
+      </p>
+
+      <div className="flex gap-2 mb-10">
+        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '180ms' }} />
+        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '360ms' }} />
+      </div>
+
+      {/* Ссылка «В начало» появляется через 10 сек — на случай если что-то зависнет */}
+      {showReturnLink && (
+        <button onClick={goToStart}
+          className="text-stone-300 text-xs underline underline-offset-2">
+          В начало
+        </button>
+      )}
+    </main>
   );
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -429,16 +527,13 @@ export default function Home() {
           <MicRow setter={setText} />
 
           <div className="w-full max-w-sm mx-auto mt-auto">
-            <button
-              onClick={handleContinue}
-              disabled={!canContinue}
+            <button onClick={handleContinue} disabled={!canContinue}
               className={[
                 'w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
                 canContinue
                   ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
                   : 'bg-stone-100 text-stone-300 cursor-not-allowed',
-              ].join(' ')}
-            >
+              ].join(' ')}>
               Продолжить →
             </button>
             {(isRecording || isTranscribing) && (
@@ -475,16 +570,13 @@ export default function Home() {
 
         <div className="w-full max-w-sm flex flex-col gap-4">
           {TOPICS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => selectTopic(t.id)}
+            <button key={t.id} onClick={() => selectTopic(t.id)}
               className={[
                 'w-full flex items-center gap-4 px-6 py-5 rounded-3xl text-left transition-all duration-200 shadow-sm',
                 topic === t.id
                   ? 'bg-rose-400 text-white shadow-rose-200 shadow-md scale-[1.02]'
                   : 'bg-white text-stone-600 hover:bg-rose-50 active:scale-[0.98]',
-              ].join(' ')}
-            >
+              ].join(' ')}>
               <span className="text-2xl">{t.emoji}</span>
               <span className="text-lg font-medium">{t.label}</span>
               {topic === t.id && <span className="ml-auto text-white opacity-80 text-xl">✓</span>}
