@@ -3,7 +3,7 @@ services:
     name: quiz
     runtime: node
     buildCommand: npm install && npm run build
-    startCommand: npm start
+    startCommand: next start -p $PORT
     envVars:
       - key: NODE_VERSION
         value: 20
