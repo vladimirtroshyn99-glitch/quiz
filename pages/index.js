@@ -1414,9 +1414,12 @@ export default function Home() {
               </div>
             )}
 
+            {/* Якорь скролла для блока рекомендаций */}
+            <div ref={revealSectionRef} />
+
             {/* Шаг 3: Куда копать — раскрывается после отправки формы */}
-            <div ref={revealSectionRef} style={{
-              maxHeight: showActionStep ? '1600px' : '0px',
+            <div style={{
+              maxHeight: showActionStep ? '1800px' : '0px',
               opacity:   showActionStep ? 1 : 0,
               overflow:  'hidden',
               transition: 'max-height 0.75s ease-in-out, opacity 0.5s ease-in-out 0.1s',
@@ -1432,29 +1435,35 @@ export default function Home() {
                 </div>
               </div>
 
-              <div style={{ animation: showActionStep ? 'unlockFadeUp 0.4s ease 0.15s both' : 'none' }}
-                className="flex flex-col gap-4 mb-4">
+              <div style={{
+                  animation: showActionStep ? 'unlockFadeUp 0.4s ease 0.15s both' : 'none',
+                  background: 'linear-gradient(160deg, #fdf6ee 0%, #fef9f4 100%)',
+                }}
+                className="flex flex-col gap-3 mb-4 rounded-3xl overflow-hidden border border-[#c46a3e]/20">
+                <div className="px-6 pt-5 pb-1">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#c46a3e]/60">Твой персональный разбор</p>
+                </div>
 
                 {/* Блок 1: С чем ты столкнулась */}
                 {action_step?.psychology && (
-                  <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">С чем ты столкнулась</p>
+                  <div className="px-6 pb-4 border-b border-[#e8dcd0]">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">С чем ты столкнулась</p>
                     <p className="text-[#5a4a42] text-[15px] leading-[1.8]">{action_step.psychology}</p>
                   </div>
                 )}
 
                 {/* Блок 2: Как с этим работать */}
                 {action_step?.path && (
-                  <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">Как с этим работать</p>
+                  <div className="px-6 pb-4 border-b border-[#e8dcd0]">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">Как с этим работать</p>
                     <p className="text-[#5a4a42] text-[15px] leading-[1.8]">{action_step.path}</p>
                   </div>
                 )}
 
                 {/* Блок 3: Первый шаг */}
                 {action_step?.first_step && (
-                  <div className="bg-[#fff3ec] border border-[#c46a3e]/40 rounded-3xl px-6 py-5 shadow-sm">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">Первый шаг к изменениям</p>
+                  <div className="px-6 pt-1 pb-5">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">Первый шаг к изменениям</p>
                     <p className="text-[#2d2520] text-[15px] font-semibold leading-snug">{action_step.first_step}</p>
                   </div>
                 )}
