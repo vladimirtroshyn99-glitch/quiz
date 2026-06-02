@@ -1363,8 +1363,11 @@ export default function Home() {
                   })}
                 </div>
 
+                {/* Якорь скролла — статичный, всегда в DOM */}
+                <div ref={leadFormRef} />
+
                 {/* Шаг 2: Форма — раскрывается после выбора вопроса */}
-                <div ref={leadFormRef} style={{
+                <div style={{
                   maxHeight: selectedQuestion !== null ? '700px' : '0px',
                   opacity:   selectedQuestion !== null ? 1 : 0,
                   overflow:  'hidden',
