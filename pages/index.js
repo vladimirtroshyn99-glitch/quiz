@@ -13,15 +13,69 @@ const SCREEN_MESSAGES = {};
 const LOADING_STAGES   = ['Анализ запроса', 'Изучаю похожие ситуации', 'Подбираю вопросы под тебя', 'Финальная проверка'];
 const ANALYZING_STAGES = ['Анализ ответов', 'Ищу ключевую проблему', 'Собираю персональный разбор', 'Готовлю рекомендации'];
 
-function WaitScreen({ title, stages, stageIdx, showReturn, onGoHome }) {
-  const r = 52;
-  const circ = 2 * Math.PI * r; // ~326.73
-  const progress = stageIdx >= 0 ? Math.min(1, (stageIdx + 1) / stages.length) : 0.06;
+// estimatedMs — ожидаемое время ответа ИИ; aiDone — ИИ ответил; onComplete — колбэк когда кольцо добежало
+function WaitScreen({ title, stages, estimatedMs = 12000, aiDone, onComplete, showReturn, onGoHome }) {
+  const [progress, setProgress] = useState(0);
+  const [showWaitMsg, setShowWaitMsg] = useState(false);
+  const progressRef  = useRef(0);
+  const completedRef = useRef(false);
+  const aiDoneRef2   = useRef(aiDone);
+  const onCompleteRef = useRef(onComplete);
+  aiDoneRef2.current  = aiDone;
+  onCompleteRef.current = onComplete;
+
+  useEffect(() => {
+    const startTime = Date.now();
+    completedRef.current = false;
+
+    const iv = setInterval(() => {
+      if (completedRef.current) return;
+      const elapsed = Date.now() - startTime;
+      const t = Math.min(elapsed / estimatedMs, 1);
+      // easeOutCubic: медленно замедляется при приближении к 88%
+      const eased = 1 - Math.pow(1 - t, 3);
+
+      let next;
+      if (aiDoneRef2.current) {
+        // ИИ ответил — добегаем быстро
+        next = Math.min(progressRef.current + 0.025, 1);
+      } else {
+        // Плавно заполняем до 88% за estimatedMs
+        next = Math.max(eased * 0.88, progressRef.current);
+      }
+
+      progressRef.current = next;
+      setProgress(next);
+
+      if (next >= 0.999 && !completedRef.current) {
+        completedRef.current = true;
+        setTimeout(() => onCompleteRef.current?.(), 250);
+      }
+    }, 80);
+
+    return () => clearInterval(iv);
+  }, [estimatedMs]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Не закрывай" — показываем когда бар завис у 88% (ИИ ещё думает) ИЛИ когда ИИ ответил и добегает
+  useEffect(() => {
+    if (progress >= 0.82 || aiDone) {
+      setShowWaitMsg(true);
+    }
+  }, [progress >= 0.82, aiDone]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // stageIdx выводится из progress, а не из таймера
+  const stageIdx = progress < 0.15 ? 0
+    : progress < 0.40 ? 1
+    : progress < 0.70 ? 2
+    : progress < 0.93 ? 3
+    : stages.length;
+
+  const r    = 52;
+  const circ = 2 * Math.PI * r;
   const offset = circ * (1 - progress);
 
   return (
-    <main className="min-h-screen bg-[#1a1410] flex flex-col items-center justify-center px-5 text-center">
-      {/* Кольцо прогресса */}
+    <main className="min-h-screen bg-[#0f0c09] flex flex-col items-center justify-center px-5 text-center">
       <div className="relative mb-7">
         <svg viewBox="0 0 120 120" className="w-32 h-32">
           <circle cx="60" cy="60" r={r} fill="none" stroke="#2a2318" strokeWidth="8" />
@@ -34,7 +88,7 @@ function WaitScreen({ title, stages, stageIdx, showReturn, onGoHome }) {
             strokeDasharray={circ}
             strokeDashoffset={offset}
             transform="rotate(-90 60 60)"
-            style={{ transition: 'stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1)' }}
+            style={{ transition: 'stroke-dashoffset 0.12s linear' }}
           />
         </svg>
         <div className="absolute inset-0 flex items-center justify-center">
@@ -43,9 +97,8 @@ function WaitScreen({ title, stages, stageIdx, showReturn, onGoHome }) {
       </div>
 
       <h2 className="text-lg font-semibold text-[#f5ede3] mb-1">{title}</h2>
-      <p className="text-[#6a5a50] text-sm mb-8">Это займёт около 15-30 секунд</p>
+      <p className="text-[#6a5a50] text-sm mb-8">Это займет около 15-30 секунд</p>
 
-      {/* Этапы */}
       <div className="flex flex-col gap-3 w-full max-w-[260px] text-left">
         {stages.map((stage, i) => {
           const done    = i < stageIdx;
@@ -70,8 +123,12 @@ function WaitScreen({ title, stages, stageIdx, showReturn, onGoHome }) {
         })}
       </div>
 
+      <div style={{ opacity: showWaitMsg ? 1 : 0, transition: 'opacity 1s ease', marginTop: '20px', minHeight: '20px' }}>
+        <p className="text-[#4a3f35] text-sm text-center">Не закрывай страницу, ещё немного...</p>
+      </div>
+
       {showReturn && (
-        <button onClick={onGoHome} className="mt-10 text-[#6a5a50] text-xs underline underline-offset-2">
+        <button onClick={onGoHome} className="mt-6 text-[#6a5a50] text-xs underline underline-offset-2">
           В начало
         </button>
       )}
@@ -133,7 +190,7 @@ export default function Home() {
   const [consentMarketing, setConsentMarketing]   = useState(false);
   const [leadSubmitting, setLeadSubmitting]       = useState(false);
   const [showActionStep, setShowActionStep]       = useState(false);
-  const [stageIdx, setStageIdx]                   = useState(-1);
+  const [loadingAiDone, setLoadingAiDone]         = useState(false);
   const [meetingFormOpen, setMeetingFormOpen]     = useState(false);
   const [meetingName, setMeetingName]             = useState('');
   const [meetingPhone, setMeetingPhone]           = useState('');
@@ -143,11 +200,13 @@ export default function Home() {
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
   const revealSectionRef                          = useRef(null);
-  const stageIdxRef                               = useRef(-1);
-  const stageSpeedRef                             = useRef(2500);
-  const stageTimerRef                             = useRef(null);
-  const aiDoneRef                                 = useRef(false);
-  const aiProceedFnRef                            = useRef(null);
+  const loadingProceedRef                         = useRef(null);
+  const leadFormRef                               = useRef(null);
+
+  // Scroll to top on every screen change
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [screen]);
 
   // WebView detection
   useEffect(() => {
@@ -191,6 +250,13 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [screen]);
 
+  // ─── Скролл к форме при выборе вопроса ───────────────────────────────────
+  useEffect(() => {
+    if (selectedQuestion !== null) {
+      setTimeout(() => leadFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 350);
+    }
+  }, [selectedQuestion]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Авто-скролл в чате ───────────────────────────────────────────────────
   useEffect(() => {
     if (screen !== 'chat') return;
@@ -214,45 +280,15 @@ export default function Home() {
       .finally(() => setIsChatLoading(false));
   }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Этапы загрузки ───────────────────────────────────────────────────────
-  function startStages(stages) {
-    clearTimeout(stageTimerRef.current);
-    stageIdxRef.current = 0;
-    stageSpeedRef.current = 4500;
-    aiDoneRef.current = false;
-    aiProceedFnRef.current = null;
-    setStageIdx(0);
-
-    function advance() {
-      const next = stageIdxRef.current + 1;
-      if (next < stages.length) {
-        stageIdxRef.current = next;
-        setStageIdx(next);
-        stageTimerRef.current = setTimeout(advance, stageSpeedRef.current);
-      } else {
-        if (aiDoneRef.current && aiProceedFnRef.current) {
-          const fn = aiProceedFnRef.current;
-          aiProceedFnRef.current = null;
-          fn();
-        }
-        // else: ждём AI — последний этап остаётся в состоянии ожидания
-      }
-    }
-    stageTimerRef.current = setTimeout(advance, stageSpeedRef.current);
+  // ─── Загрузка: сигналы для WaitScreen ────────────────────────────────────
+  function startStages() {
+    setLoadingAiDone(false);
+    loadingProceedRef.current = null;
   }
 
-  function signalAiDone(proceedFn, stagesLen) {
-    aiDoneRef.current = true;
-    aiProceedFnRef.current = proceedFn;
-    if (stageIdxRef.current >= stagesLen - 1) {
-      // Все этапы уже показаны — переходим сразу
-      clearTimeout(stageTimerRef.current);
-      aiProceedFnRef.current = null;
-      proceedFn();
-    } else {
-      // Переключаемся на быстрый режим
-      stageSpeedRef.current = 300;
-    }
+  function signalAiDone(proceedFn) {
+    loadingProceedRef.current = proceedFn;
+    setLoadingAiDone(true);
   }
 
   // ─── Навигация ────────────────────────────────────────────────────────────
@@ -372,7 +408,7 @@ export default function Home() {
   // ─── Claude: анализ запроса → квиз ───────────────────────────────────────
   async function callAnalyze(payload) {
     setScreen('loading');
-    startStages(LOADING_STAGES);
+    startStages();
     try {
       const res  = await fetch('/api/analyze', {
         method:  'POST',
@@ -387,17 +423,16 @@ export default function Home() {
           setAiQuestion(data.ai_question);
           setClarificationText('');
           setScreen('clarification');
-        }, LOADING_STAGES.length);
+        });
       } else if (data.status === 'ready_for_quiz') {
         signalAiDone(() => {
           setQuizData(data.quiz_data);
           setQuizIndex(0);
           setAnswers([]);
           setScreen('quiz');
-        }, LOADING_STAGES.length);
+        });
       }
     } catch (err) {
-      clearTimeout(stageTimerRef.current);
       alert(err.message || 'Что-то пошло не так. Попробуй ещё раз.');
       setScreen('input');
     }
@@ -415,7 +450,7 @@ export default function Home() {
 
   // ─── Claude: генерация разбора результатов ────────────────────────────────
   async function startResultGeneration(payload) {
-    startStages(ANALYZING_STAGES);
+    startStages();
     try {
       const res  = await fetch('/api/result', {
         method:  'POST',
@@ -427,9 +462,8 @@ export default function Home() {
       signalAiDone(() => {
         setResultData(data);
         setScreen('result');
-      }, ANALYZING_STAGES.length);
+      });
     } catch (err) {
-      clearTimeout(stageTimerRef.current);
       setAnalyzeError(err.message || 'Не удалось получить разбор. Попробуй ещё раз.');
     }
   }
@@ -478,7 +512,7 @@ export default function Home() {
     } catch { /* fail silently */ }
     setLeadSubmitting(false);
     setShowActionStep(true);
-    setTimeout(() => revealSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    setTimeout(() => revealSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 800);
   }
 
   // ─── "Да, хочу на разбор": уведомляем Vakas и переходим ─────────────────
@@ -593,6 +627,48 @@ export default function Home() {
     }
   }
 
+  // ─── Генерация PDF разбора ────────────────────────────────────────────────
+  function generateAndDownloadPDF() {
+    if (!resultData) return;
+    const rd = resultData;
+    const topicLabel = TOPICS.find(t => t.id === topic)?.label || '';
+    const block5html = showActionStep && rd.action_step ? `
+      <h2>Куда копать</h2>
+      ${rd.action_step?.psychology ? `<h3>С чем ты столкнулась</h3><p>${rd.action_step.psychology}</p>` : ''}
+      ${rd.action_step?.path ? `<h3>Как с этим работать</h3><p>${rd.action_step.path}</p>` : ''}
+      ${rd.action_step?.first_step ? `<p><strong>Первый шаг:</strong> ${rd.action_step.first_step}</p>` : ''}
+    ` : '';
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+      <title>Мой разбор - ${topicLabel}</title>
+      <style>
+        body { font-family: Georgia, serif; max-width: 600px; margin: 40px auto; padding: 0 20px; color: #2d2520; line-height: 1.7; }
+        h1 { color: #c46a3e; font-size: 22px; margin-bottom: 8px; }
+        h2 { color: #c46a3e; font-size: 16px; margin-top: 32px; margin-bottom: 8px; border-bottom: 1px solid #e8dcd0; padding-bottom: 4px; }
+        p { margin: 8px 0; font-size: 15px; }
+        .meta { color: #8b7b6f; font-size: 13px; }
+        @media print { body { margin: 20px; } }
+      </style>
+    </head><body>
+      <h1>Мой разбор</h1>
+      <p class="meta">Сфера: ${topicLabel}</p>
+      <h2>Твоя ситуация сейчас</h2>
+      ${(rd.block1_mirror?.points || []).map(p => `<p>${p.because || p.text || ''}</p>`).join('')}
+      ${rd.block1_mirror?.conclusion ? `<p><em>${rd.block1_mirror.conclusion}</em></p>` : ''}
+      <h2>Вот что тебя держит</h2>
+      ${rd.block2_problem?.title ? `<p><strong>${rd.block2_problem.title}</strong></p>` : ''}
+      <p>${rd.block2_problem?.mechanism || ''}</p>
+      <h2>Чего ты на самом деле хочешь</h2>
+      <p>${rd.block3_pointB?.text || ''}</p>
+      ${rd.block4_lose ? `<h2>Цена бездействия</h2><p>${rd.block4_lose}</p>` : ''}
+      ${block5html}
+    </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 600);
+  }
+
   // ─── Переиспользуемые блоки ───────────────────────────────────────────────
   const topicObj = TOPICS.find(t => t.id === topic);
 
@@ -662,10 +738,10 @@ export default function Home() {
     const benefits = [
       { icon: '🔎', text: 'Увидишь сценарий рода, который работает именно у тебя' },
       { icon: '🔗', text: 'Поймёшь связь между тем, что происходит сейчас, и тем, что было в семье' },
-      { icon: '🧭', text: 'Получишь конкретный вектор — что с этим можно сделать' },
+      { icon: '🧭', text: 'Получишь конкретный вектор: что с этим можно сделать' },
     ];
     return (
-      <main className="min-h-screen bg-[#1a1410] flex flex-col items-center px-5 pt-12 pb-14">
+      <main className="min-h-screen bg-[#0f0c09] flex flex-col items-center px-5 pt-12 pb-14">
         <div className="w-full max-w-sm mx-auto flex flex-col items-center">
 
           {/* Шапка эксперта */}
@@ -725,7 +801,7 @@ export default function Home() {
 
           {/* Кнопка */}
           <p className="text-[17px] font-semibold text-[#f5ede3] text-center leading-snug mb-4">
-            Узнай, что тебя держит — и как это можно изменить
+            Узнай, что тебя держит. И как это изменить
           </p>
           <button
             onClick={() => setScreen('start')}
@@ -749,7 +825,9 @@ export default function Home() {
     <WaitScreen
       title="Подбираем вопросы для тебя"
       stages={LOADING_STAGES}
-      stageIdx={stageIdx}
+      estimatedMs={20000}
+      aiDone={loadingAiDone}
+      onComplete={() => loadingProceedRef.current?.()}
     />
   );
 
@@ -811,7 +889,7 @@ export default function Home() {
     return (
       <>
         {IOSOverlay}
-        <main className="min-h-screen bg-[#1a1410] flex flex-col px-5 pt-8 pb-10">
+        <main className="min-h-screen bg-[#0f0c09] flex flex-col px-5 pb-10" style={{ paddingTop: 'max(48px, env(safe-area-inset-top, 48px))' }}>
           {/* Шапка */}
           <div className="flex items-center justify-between mb-4">
             {quizIndex > 0
@@ -977,7 +1055,9 @@ export default function Home() {
       <WaitScreen
         title="Анализируем твои ответы"
         stages={ANALYZING_STAGES}
-        stageIdx={stageIdx}
+        estimatedMs={22000}
+        aiDone={loadingAiDone}
+        onComplete={() => loadingProceedRef.current?.()}
         showReturn={showReturnLink}
         onGoHome={goToStart}
       />
@@ -1088,7 +1168,7 @@ export default function Home() {
                 </div>
                 <div className="flex-1 pt-0.5">
                   <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-0.5">Зеркало</p>
-                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Точка А: где ты сейчас</h3>
+                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Твоя ситуация сейчас</h3>
                 </div>
               </div>
 
@@ -1132,7 +1212,7 @@ export default function Home() {
                   <span className="text-xl">⚓</span>
                 </div>
                 <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-0.5">Ключевая проблема</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-0.5">Почему пока не получается</p>
                   <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что тебя держит</h3>
                 </div>
               </div>
@@ -1190,8 +1270,8 @@ export default function Home() {
                   <span className="text-xl">✨</span>
                 </div>
                 <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400 mb-0.5">Точка Б</p>
-                  <h3 className="text-rose-800 font-semibold text-[15px] leading-snug">Куда ты хочешь</h3>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400 mb-0.5">Твоё желаемое</p>
+                  <h3 className="text-rose-800 font-semibold text-[15px] leading-snug">Чего ты на самом деле хочешь</h3>
                 </div>
               </div>
 
@@ -1284,7 +1364,7 @@ export default function Home() {
                 </div>
 
                 {/* Шаг 2: Форма — раскрывается после выбора вопроса */}
-                <div style={{
+                <div ref={leadFormRef} style={{
                   maxHeight: selectedQuestion !== null ? '700px' : '0px',
                   opacity:   selectedQuestion !== null ? 1 : 0,
                   overflow:  'hidden',
@@ -1338,12 +1418,41 @@ export default function Home() {
               overflow:  'hidden',
               transition: 'max-height 0.75s ease-in-out, opacity 0.5s ease-in-out 0.1s',
             }}>
-              <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0] mb-4">
-                <p className="text-[#5a4a42] text-[15px] leading-[1.8] mb-5">{action_step?.intro}</p>
-                {action_step?.week_task && (
-                  <div className="bg-[#fff3ec] border border-[#c46a3e]/30 rounded-2xl px-4 py-4">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-1.5">Твой первый шаг на эту неделю</p>
-                    <p className="text-[#2d2520] text-[15px] font-medium leading-snug">{action_step.week_task}</p>
+
+              {/* Заголовок рекомендации */}
+              <div style={{ animation: showActionStep ? 'unlockFadeUp 0.4s ease both' : 'none' }}
+                className="mb-4 bg-[#fff3ec] border border-[#c46a3e]/30 rounded-2xl px-5 py-4 flex items-center gap-3">
+                <div className="w-1 self-stretch bg-[#c46a3e] rounded-full flex-shrink-0" />
+                <div>
+                  <p className="text-[#2d2520] font-semibold text-[15px] leading-snug">Твои рекомендации готовы</p>
+                  <p className="text-[#8b7b6f] text-xs mt-0.5">Персональный разбор специально для тебя</p>
+                </div>
+              </div>
+
+              <div style={{ animation: showActionStep ? 'unlockFadeUp 0.4s ease 0.15s both' : 'none' }}
+                className="flex flex-col gap-4 mb-4">
+
+                {/* Блок 1: С чем ты столкнулась */}
+                {action_step?.psychology && (
+                  <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">С чем ты столкнулась</p>
+                    <p className="text-[#5a4a42] text-[15px] leading-[1.8]">{action_step.psychology}</p>
+                  </div>
+                )}
+
+                {/* Блок 2: Как с этим работать */}
+                {action_step?.path && (
+                  <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">Как с этим работать</p>
+                    <p className="text-[#5a4a42] text-[15px] leading-[1.8]">{action_step.path}</p>
+                  </div>
+                )}
+
+                {/* Блок 3: Первый шаг */}
+                {action_step?.first_step && (
+                  <div className="bg-[#fff3ec] border border-[#c46a3e]/40 rounded-3xl px-6 py-5 shadow-sm">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-2">Первый шаг к изменениям</p>
+                    <p className="text-[#2d2520] text-[15px] font-semibold leading-snug">{action_step.first_step}</p>
                   </div>
                 )}
               </div>
@@ -1552,7 +1661,7 @@ export default function Home() {
       { icon: '💬', text: 'Даст конкретные рекомендации именно под тебя и ответит на вопросы' },
     ];
     const HOW_ITEMS = [
-      { icon: '📹', label: 'Формат', text: 'Видеозвонок или обычный звонок - уточним при записи' },
+      { icon: '📹', label: 'Формат', text: 'Видеозвонок или обычный звонок. Уточним при записи' },
       { icon: '⏱', label: 'Время', text: '20 минут, без воды и лишних слов' },
       { icon: '👤', label: 'Кто', text: 'Один на один с живым специалистом' },
       { icon: '🤝', label: 'Атмосфера', text: 'Без давления - помогаем разобраться, не навязываем' },
@@ -1566,7 +1675,7 @@ export default function Home() {
     return (
       <>
         {IOSOverlay}
-        <main className="min-h-screen bg-[#1a1410] flex flex-col px-5 pt-8 pb-16">
+        <main className="min-h-screen bg-[#0f0c09] flex flex-col px-5 pb-16" style={{ paddingTop: 'max(32px, env(safe-area-inset-top, 32px))' }}>
           <div className="flex items-center mb-8">
             <button onClick={() => setScreen('result')} className="text-[#6a5a50] text-sm">
               ← Назад
@@ -1574,6 +1683,17 @@ export default function Home() {
           </div>
 
           <div className="w-full max-w-sm mx-auto flex flex-col">
+
+            {/* Блок подтверждения */}
+            <div className="bg-[#1a2e14] border border-[#2a4a1e] rounded-3xl px-5 py-5 mb-8 flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full bg-[#2a4a1e] flex items-center justify-center flex-shrink-0 text-[#6ecf47] font-bold text-lg">
+                ✓
+              </div>
+              <div>
+                <p className="text-[#f5ede3] font-semibold text-[17px] leading-snug mb-1">Вы записались на встречу!</p>
+                <p className="text-[#7a9e72] text-sm leading-relaxed">С вами свяжется специалист, чтобы выбрать удобное время и ответить на ваши вопросы. А пока посмотрите, как проходит встреча.</p>
+              </div>
+            </div>
 
             {/* Заголовок */}
             <div className="text-center mb-8">
@@ -1584,7 +1704,7 @@ export default function Home() {
                 Твоя встреча с родологом
               </h1>
               <p className="text-[#8b7b6f] text-sm leading-relaxed">
-                20 минут разговора - и ты поймёшь, что именно мешает тебе двигаться вперёд
+                20 минут разговора. Ты поймёшь, что именно мешает двигаться вперёд
               </p>
             </div>
 
@@ -1634,57 +1754,21 @@ export default function Home() {
               ))}
             </div>
 
-            {/* Форма */}
-            {!meetingSubmitted ? (
-              !meetingFormOpen ? (
-                <div className="text-center">
-                  <button
-                    onClick={() => setMeetingFormOpen(true)}
-                    className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-lg active:scale-[0.98] transition-transform mb-2"
-                  >
-                    Записаться на встречу →
-                  </button>
-                  <p className="text-[#6a5a50] text-xs">Выбери удобное время - уточним при звонке</p>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  <p className="text-[#f5ede3] text-base font-semibold text-center mb-1">Оставь контакты</p>
-                  <p className="text-[#8b7b6f] text-sm text-center mb-2">Специалист свяжется и согласует время</p>
-                  <input
-                    type="text"
-                    placeholder="Твоё имя"
-                    value={meetingName}
-                    onChange={e => setMeetingName(e.target.value)}
-                    className="w-full bg-[#2a2318] border border-[#3d352a] rounded-2xl px-4 py-3 text-[#f5ede3] text-sm placeholder-[#6a5a50] outline-none focus:border-[#c46a3e] transition-colors"
-                  />
-                  <input
-                    type="tel"
-                    placeholder="Номер телефона"
-                    value={meetingPhone}
-                    onChange={e => setMeetingPhone(e.target.value)}
-                    className="w-full bg-[#2a2318] border border-[#3d352a] rounded-2xl px-4 py-3 text-[#f5ede3] text-sm placeholder-[#6a5a50] outline-none focus:border-[#c46a3e] transition-colors"
-                  />
-                  <button
-                    onClick={handleMeetingSubmit}
-                    disabled={meetingSubmitting || !meetingName.trim() || !meetingPhone.trim()}
-                    className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-lg active:scale-[0.98] transition-transform disabled:opacity-50 mt-1"
-                  >
-                    {meetingSubmitting ? 'Отправляем...' : 'Отправить →'}
-                  </button>
-                  <p className="text-[#4a3f35] text-xs text-center">
-                    Нажимая кнопку, ты соглашаешься с тем, что мы свяжемся с тобой
-                  </p>
-                </div>
-              )
-            ) : (
-              <div className="bg-[#1e4012] border border-[#2a5a1a] rounded-3xl px-5 py-6 text-center">
-                <p className="text-2xl mb-3">✓</p>
-                <p className="text-[#6ecf47] font-semibold text-base mb-2">Заявка принята</p>
-                <p className="text-[#8b7b6f] text-sm leading-relaxed">
-                  Специалист свяжется с тобой в ближайшее время и согласует удобное время встречи
-                </p>
-              </div>
-            )}
+            {/* Кнопки действий */}
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => setScreen('result')}
+                className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-lg active:scale-[0.98] transition-transform"
+              >
+                Поняла, вернуться к разбору →
+              </button>
+              <button
+                onClick={generateAndDownloadPDF}
+                className="w-full py-4 rounded-3xl bg-[#2a2318] border border-[#3d352a] text-[#d4cfc8] font-medium text-sm active:scale-[0.98] transition-transform"
+              >
+                Сохранить разбор в PDF
+              </button>
+            </div>
 
           </div>
         </main>
@@ -1841,7 +1925,7 @@ export default function Home() {
           О чём ты думаешь чаще всего прямо сейчас?
         </h1>
         <p className="text-[#8b7b6f] text-sm text-center leading-relaxed mb-10 max-w-xs">
-          Выбери ту сферу, куда мысли возвращаются снова и снова — где есть тревога, застревание или ощущение, что что-то идёт не так. Не думай долго. Первый отклик — самый точный.
+          Выбери ту сферу, куда мысли возвращаются снова и снова. Где есть тревога, застревание или ощущение, что что-то идёт не так. Не думай долго. Первый отклик самый точный.
         </p>
         <div className="w-full max-w-sm flex flex-col gap-4">
           {TOPICS.map((t) => (
