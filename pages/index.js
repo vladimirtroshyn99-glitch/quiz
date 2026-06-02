@@ -4,25 +4,80 @@ const TOPICS = [
   { id: 'money',     label: 'Деньги',         emoji: '💰' },
   { id: 'relations', label: 'Отношения',       emoji: '🌸' },
   { id: 'self',      label: 'Самореализация',  emoji: '✨' },
-  { id: 'health',    label: 'Здоровье',        emoji: '🌿' },
 ];
 
-// QUIZ_OPTIONS удалены — варианты ответов теперь динамические из question.options
+// Варианты ответов теперь динамические из question.options
 
-const SCREEN_MESSAGES = {
-  loading: [
-    'Изучаю твой запрос...',
-    'Сверяюсь с паттернами рода...',
-    'Ищу нити твоей истории...',
-    'Готовлю вопросы для тебя...',
-  ],
-  analyzing: [
-    'Анализирую твои ответы...',
-    'Сопоставляю с родовыми сценариями...',
-    'Ищу корневые нити...',
-    'Уже почти готово...',
-  ],
-};
+const SCREEN_MESSAGES = {};
+
+const LOADING_STAGES   = ['Анализ запроса', 'Изучаю похожие ситуации', 'Подбираю вопросы под тебя', 'Финальная проверка'];
+const ANALYZING_STAGES = ['Анализ ответов', 'Ищу ключевую проблему', 'Собираю персональный разбор', 'Готовлю рекомендации'];
+
+function WaitScreen({ title, stages, stageIdx, showReturn, onGoHome }) {
+  const r = 52;
+  const circ = 2 * Math.PI * r; // ~326.73
+  const progress = stageIdx >= 0 ? Math.min(1, (stageIdx + 1) / stages.length) : 0.06;
+  const offset = circ * (1 - progress);
+
+  return (
+    <main className="min-h-screen bg-[#1a1410] flex flex-col items-center justify-center px-5 text-center">
+      {/* Кольцо прогресса */}
+      <div className="relative mb-7">
+        <svg viewBox="0 0 120 120" className="w-32 h-32">
+          <circle cx="60" cy="60" r={r} fill="none" stroke="#2a2318" strokeWidth="8" />
+          <circle
+            cx="60" cy="60" r={r}
+            fill="none"
+            stroke="#c8922a"
+            strokeWidth="8"
+            strokeLinecap="round"
+            strokeDasharray={circ}
+            strokeDashoffset={offset}
+            transform="rotate(-90 60 60)"
+            style={{ transition: 'stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1)' }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="text-3xl">🌷</span>
+        </div>
+      </div>
+
+      <h2 className="text-lg font-semibold text-[#f5ede3] mb-1">{title}</h2>
+      <p className="text-[#6a5a50] text-sm mb-8">Это займёт около 15-30 секунд</p>
+
+      {/* Этапы */}
+      <div className="flex flex-col gap-3 w-full max-w-[260px] text-left">
+        {stages.map((stage, i) => {
+          const done    = i < stageIdx;
+          const current = i === stageIdx;
+          return (
+            <div key={i} className="flex items-center gap-3">
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold transition-all duration-300 ${
+                done    ? 'bg-[#1e4012] text-[#6ecf47]' :
+                current ? 'bg-[#3d2e1a]' : 'bg-[#221c14]'
+              }`}>
+                {done ? '✓' : current ? (
+                  <span className="w-2 h-2 rounded-full bg-[#c8922a] animate-pulse block" />
+                ) : (
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#4a3f35] block" />
+                )}
+              </div>
+              <span className={`text-sm transition-colors duration-300 ${
+                done ? 'text-[#6ecf47]' : current ? 'text-[#f5ede3]' : 'text-[#4a3f35]'
+              }`}>{stage}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {showReturn && (
+        <button onClick={onGoHome} className="mt-10 text-[#6a5a50] text-xs underline underline-offset-2">
+          В начало
+        </button>
+      )}
+    </main>
+  );
+}
 
 function detectInAppBrowser() {
   if (typeof navigator === 'undefined') return { isInApp: false, isAndroid: false, isIOS: false };
@@ -41,7 +96,7 @@ function redirectAndroidToChrome() {
 
 export default function Home() {
   // screens: 'start'|'input'|'loading'|'clarification'|'quiz'|'analyzing'|'result'|'chat'|'offer'|'assistant'|'telegram'
-  const [screen, setScreen]                       = useState('start');
+  const [screen, setScreen]                       = useState('promo');
   const [topic, setTopic]                         = useState(null);
   const [text, setText]                           = useState('');
   const [clarificationText, setClarificationText] = useState('');
@@ -75,12 +130,18 @@ export default function Home() {
   const [consentMarketing, setConsentMarketing]   = useState(false);
   const [leadSubmitting, setLeadSubmitting]       = useState(false);
   const [showActionStep, setShowActionStep]       = useState(false);
+  const [stageIdx, setStageIdx]                   = useState(-1);
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
   const revealSectionRef                          = useRef(null);
+  const stageIdxRef                               = useRef(-1);
+  const stageSpeedRef                             = useRef(2500);
+  const stageTimerRef                             = useRef(null);
+  const aiDoneRef                                 = useRef(false);
+  const aiProceedFnRef                            = useRef(null);
 
-  // ─── WebView detection ────────────────────────────────────────────────────
+  // WebView detection
   useEffect(() => {
     const detected = detectInAppBrowser();
     setBrowser(detected);
@@ -95,7 +156,7 @@ export default function Home() {
     }
   }, []);
 
-  // ─── Цикличные сообщения на лоадерах ─────────────────────────────────────
+  // Цикличные сообщения на лоадерах
   useEffect(() => {
     const msgs = SCREEN_MESSAGES[screen];
     if (!msgs) return;
@@ -144,6 +205,47 @@ export default function Home() {
       .catch(() => setChatHistory([{ role: 'assistant', content: 'Привет! О чём хотелось бы поговорить?' }]))
       .finally(() => setIsChatLoading(false));
   }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Этапы загрузки ───────────────────────────────────────────────────────
+  function startStages(stages) {
+    clearTimeout(stageTimerRef.current);
+    stageIdxRef.current = 0;
+    stageSpeedRef.current = 2500;
+    aiDoneRef.current = false;
+    aiProceedFnRef.current = null;
+    setStageIdx(0);
+
+    function advance() {
+      const next = stageIdxRef.current + 1;
+      if (next < stages.length) {
+        stageIdxRef.current = next;
+        setStageIdx(next);
+        stageTimerRef.current = setTimeout(advance, stageSpeedRef.current);
+      } else {
+        if (aiDoneRef.current && aiProceedFnRef.current) {
+          const fn = aiProceedFnRef.current;
+          aiProceedFnRef.current = null;
+          fn();
+        }
+        // else: ждём AI — последний этап остаётся в состоянии ожидания
+      }
+    }
+    stageTimerRef.current = setTimeout(advance, stageSpeedRef.current);
+  }
+
+  function signalAiDone(proceedFn, stagesLen) {
+    aiDoneRef.current = true;
+    aiProceedFnRef.current = proceedFn;
+    if (stageIdxRef.current >= stagesLen - 1) {
+      // Все этапы уже показаны — переходим сразу
+      clearTimeout(stageTimerRef.current);
+      aiProceedFnRef.current = null;
+      proceedFn();
+    } else {
+      // Переключаемся на быстрый режим
+      stageSpeedRef.current = 300;
+    }
+  }
 
   // ─── Навигация ────────────────────────────────────────────────────────────
   function selectTopic(id) {
@@ -233,6 +335,7 @@ export default function Home() {
   // ─── Claude: анализ запроса → квиз ───────────────────────────────────────
   async function callAnalyze(payload) {
     setScreen('loading');
+    startStages(LOADING_STAGES);
     try {
       const res  = await fetch('/api/analyze', {
         method:  'POST',
@@ -243,16 +346,21 @@ export default function Home() {
       if (data.error) throw new Error(data.error);
 
       if (data.status === 'need_clarification') {
-        setAiQuestion(data.ai_question);
-        setClarificationText('');
-        setScreen('clarification');
+        signalAiDone(() => {
+          setAiQuestion(data.ai_question);
+          setClarificationText('');
+          setScreen('clarification');
+        }, LOADING_STAGES.length);
       } else if (data.status === 'ready_for_quiz') {
-        setQuizData(data.quiz_data);
-        setQuizIndex(0);
-        setAnswers([]);
-        setScreen('quiz');
+        signalAiDone(() => {
+          setQuizData(data.quiz_data);
+          setQuizIndex(0);
+          setAnswers([]);
+          setScreen('quiz');
+        }, LOADING_STAGES.length);
       }
     } catch (err) {
+      clearTimeout(stageTimerRef.current);
       alert(err.message || 'Что-то пошло не так. Попробуй ещё раз.');
       setScreen('input');
     }
@@ -270,6 +378,7 @@ export default function Home() {
 
   // ─── Claude: генерация разбора результатов ────────────────────────────────
   async function startResultGeneration(payload) {
+    startStages(ANALYZING_STAGES);
     try {
       const res  = await fetch('/api/result', {
         method:  'POST',
@@ -278,9 +387,12 @@ export default function Home() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setResultData(data);
-      setScreen('result');
+      signalAiDone(() => {
+        setResultData(data);
+        setScreen('result');
+      }, ANALYZING_STAGES.length);
     } catch (err) {
+      clearTimeout(stageTimerRef.current);
       setAnalyzeError(err.message || 'Не удалось получить разбор. Попробуй ещё раз.');
     }
   }
@@ -326,7 +438,7 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ telegram: leadTelegram, phone: leadPhone, sphere: topicLabel, query: text }),
       });
-    } catch { /* fail silently — не блокируем UX */ }
+    } catch { /* fail silently */ }
     setLeadSubmitting(false);
     setShowLeadModal(false);
     setShowActionStep(true);
@@ -436,22 +548,22 @@ export default function Home() {
     return (
       <div className="flex justify-center mt-4 mb-6">
         {isTranscribing ? (
-          <div className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-stone-50 border border-stone-200 text-stone-400 text-sm">
-            <span className="w-2 h-2 rounded-full bg-rose-300 animate-pulse inline-block" />
+          <div className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-[#fff9f4] border border-[#dcc9ba] text-[#8b7b6f] text-sm">
+            <span className="w-2 h-2 rounded-full bg-[#d97a4e] animate-pulse inline-block" />
             Распознаём...
           </div>
         ) : !isRecording ? (
           <button onClick={() => startRecording(setter)}
-            className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-white border border-stone-200 text-stone-500 text-sm font-medium shadow-sm hover:bg-rose-50 hover:border-rose-200 transition-all active:scale-[0.97]">
+            className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-[#fff9f4] border border-[#dcc9ba] text-stone-500 text-sm font-medium shadow-sm hover:bg-[#fff9f4] hover:border-[#c46a3e] transition-all active:scale-[0.97]">
             <span className="text-lg">🎙️</span>
             Надиктовать голосом
           </button>
         ) : (
           <button onClick={stopRecording}
-            className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-stone-100 border border-stone-200 text-stone-500 text-sm font-medium shadow-sm active:scale-[0.97]">
+            className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-[#3d352a] border border-[#dcc9ba] text-stone-500 text-sm font-medium shadow-sm active:scale-[0.97]">
             <span className="w-3 h-3 rounded-sm bg-stone-400 inline-block flex-shrink-0" />
             Остановить и распознать
-            <span className="w-2 h-2 rounded-full bg-rose-300 animate-pulse inline-block flex-shrink-0" />
+            <span className="w-2 h-2 rounded-full bg-[#d97a4e] animate-pulse inline-block flex-shrink-0" />
           </button>
         )}
       </div>
@@ -460,16 +572,16 @@ export default function Home() {
 
   const IOSOverlay = showOverlay && (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-center">
+      <div className="w-full max-w-sm rounded-3xl bg-[#fff9f4] p-6 shadow-2xl text-center">
         <p className="text-3xl mb-3">🌐</p>
         <p className="font-semibold text-stone-800 text-lg mb-2">Откройте в Safari</p>
         <p className="text-stone-500 text-sm leading-relaxed mb-5">
           Для корректной работы нажмите{' '}
-          <span className="font-bold text-stone-700">•••</span> вверху
-          и выберите <span className="font-bold text-stone-700">«Открыть в браузере»</span>.
+          <span className="font-bold text-[#2d2520]">•••</span> вверху
+          и выберите <span className="font-bold text-[#2d2520]">«Открыть в браузере»</span>.
         </p>
         <button onClick={() => setShowOverlay(false)}
-          className="w-full py-3 rounded-2xl bg-rose-50 text-rose-500 font-medium text-sm">
+          className="w-full py-3 rounded-2xl bg-[#fff9f4] text-rose-500 font-medium text-sm">
           Закрыть
         </button>
       </div>
@@ -479,28 +591,114 @@ export default function Home() {
   const InAppBanner = browser.isInApp && !browser.isAndroid && !showOverlay && (
     <div className="w-full bg-amber-50 border-b border-amber-200 px-4 py-3">
       <p className="text-amber-800 text-xs text-center leading-snug">
-        Рекомендуем открыть в браузере —
+        Рекомендуем открыть в браузере
         нажмите <span className="font-semibold">•••</span> вверху и выберите «Открыть в браузере».
       </p>
     </div>
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЛОАДЕР — анализ запроса
+  // ПРОМО-ЛЕНДИНГ
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'promo') {
+    const steps = [
+      'Выбери сферу, где чувствуешь затык',
+      'Опиши ситуацию своими словами',
+      '10 персональных вопросов под тебя',
+      'Получи разбор прямо на экране',
+    ];
+    const benefits = [
+      { icon: '🔎', text: 'Увидишь сценарий рода, который работает именно у тебя — по деньгам, отношениям или самореализации' },
+      { icon: '🔗', text: 'Поймёшь связь между тем, что происходит сейчас, и тем, что было в семье' },
+      { icon: '🧭', text: 'Получишь конкретный вектор — что с этим можно сделать' },
+    ];
+    return (
+      <main className="min-h-screen bg-[#f9f5f0] flex flex-col items-center px-5 pt-12 pb-14">
+        <div className="w-full max-w-sm mx-auto flex flex-col items-center">
+
+          {/* Шапка эксперта */}
+          <div
+            className="w-[72px] h-[72px] rounded-full flex items-center justify-center mb-3 shadow-md text-white font-bold text-xl"
+            style={{ background: 'linear-gradient(145deg, #7C3069, #c46a3e)' }}
+          >КМ</div>
+          <h2 className="text-[17px] font-semibold text-[#2d2520] mb-1">Ксения Мосунова</h2>
+          <p className="text-[11px] font-semibold tracking-[0.14em] uppercase text-[#c46a3e] mb-8">
+            Психогенеалог
+          </p>
+
+          {/* Заголовок */}
+          <h1 className="text-[26px] font-semibold text-[#2d2520] text-center leading-tight mb-3">
+            Почему одно и то же повторяется{' '}
+            <span className="text-[#c46a3e] italic">и что с этим делать</span>
+          </h1>
+          <p className="text-sm text-[#8b7b6f] text-center leading-relaxed mb-6">
+            Разберём твою ситуацию через сценарии рода и найдём точку входа
+          </p>
+
+          {/* Теги */}
+          <div className="flex flex-wrap gap-2 justify-center mb-8">
+            {['4 шага', '5 минут', 'разбор сразу на экране'].map((tag) => (
+              <span key={tag} className="px-4 py-1.5 rounded-full bg-[#fff9f4] border border-[#e8dcd0] text-[#8b7b6f] text-xs">
+                {tag}
+              </span>
+            ))}
+          </div>
+
+          {/* Как это работает */}
+          <div className="w-full bg-[#1a1410] rounded-3xl px-5 py-5 mb-4 shadow-sm">
+            <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-[#c46a3e] mb-4">
+              Как это работает
+            </p>
+            <div className="flex flex-col gap-3">
+              {steps.map((s, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-[22px] h-[22px] rounded-full bg-[#c46a3e] flex items-center justify-center flex-shrink-0 text-white text-[11px] font-bold">
+                    {i + 1}
+                  </div>
+                  <p className="text-[#f5ede3] text-sm leading-snug">{s}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Блоки пользы */}
+          <div className="w-full flex flex-col gap-3 mb-10">
+            {benefits.map((b, i) => (
+              <div key={i} className="w-full bg-[#fff9f4] border border-[#e8dcd0] rounded-2xl px-4 py-4 flex items-start gap-3 shadow-sm">
+                <span className="text-xl flex-shrink-0 leading-none">{b.icon}</span>
+                <p className="text-[#5a4a42] text-sm leading-relaxed">{b.text}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Кнопка */}
+          <p className="text-[17px] font-semibold text-[#2d2520] text-center leading-snug mb-4">
+            Узнай, что тебя держит — и как это можно изменить
+          </p>
+          <button
+            onClick={() => setScreen('start')}
+            className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base text-center shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform mb-3"
+          >
+            Получить разбор →
+          </button>
+          <p className="text-[11px] text-[#8b7b6f] tracking-wide">
+            Бесплатно · Без регистрации · 5 минут
+          </p>
+
+        </div>
+      </main>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Загрузка: анализ запроса
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'loading') return (
-    <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
-      <div className="w-20 h-20 rounded-full bg-rose-100 flex items-center justify-center mb-8 shadow-sm animate-pulse">
-        <span className="text-4xl">🌷</span>
-      </div>
-      <p className="text-xl font-medium text-stone-600 mb-2">{displayMsg}</p>
-      <p className="text-stone-400 text-sm mb-8">Это займёт несколько секунд</p>
-      <div className="flex gap-2">
-        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
-        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '180ms' }} />
-        <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '360ms' }} />
-      </div>
-    </main>
+    <WaitScreen
+      title="Подбираем вопросы для тебя"
+      stages={LOADING_STAGES}
+      stageIdx={stageIdx}
+    />
   );
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -512,35 +710,35 @@ export default function Home() {
       <>
         {IOSOverlay}
         {InAppBanner}
-        <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+        <main className="min-h-screen bg-[#f9f5f0] flex flex-col px-5 pt-8 pb-10">
           <div className="flex items-center justify-between mb-8">
-            <button onClick={goBack} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            <button onClick={goBack} className="text-[#8b7b6f] text-sm hover:text-[#5a4a42] transition-colors">
               ← Назад
             </button>
-            <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+            <div className="flex items-center gap-2 bg-[#fff9f4] border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
               <span>{topicObj?.emoji}</span>
-              <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+              <span className="text-[#5a4a42] text-sm font-medium">{topicObj?.label}</span>
             </div>
           </div>
 
-          <div className="w-full max-w-sm mx-auto bg-white rounded-3xl p-5 shadow-sm border border-rose-50 mb-6">
+          <div className="w-full max-w-sm mx-auto bg-[#fff9f4] rounded-3xl p-5 shadow-sm border border-rose-50 mb-6">
             <div className="flex items-start gap-3">
               <span className="text-2xl flex-shrink-0">🌷</span>
-              <p className="text-stone-600 text-sm leading-relaxed">{aiQuestion}</p>
+              <p className="text-[#5a4a42] text-sm leading-relaxed">{aiQuestion}</p>
             </div>
           </div>
 
           <textarea value={clarificationText} onChange={e => setClarificationText(e.target.value)}
             placeholder="Напиши свой ответ..."
-            className="w-full max-w-sm mx-auto rounded-3xl border border-stone-200 bg-white p-5 text-stone-700 text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-rose-200 shadow-sm min-h-[160px]" />
+            className="w-full max-w-sm mx-auto rounded-3xl border border-[#dcc9ba] bg-[#fff9f4] p-5 text-[#2d2520] text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-[#c46a3e] shadow-sm min-h-[160px]" />
 
           <MicRow setter={setClarificationText} />
 
           <div className="w-full max-w-sm mx-auto mt-auto">
             <button onClick={handleClarificationAnswer} disabled={!canAnswer}
               className={['w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
-                canAnswer ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
-                          : 'bg-stone-100 text-stone-300 cursor-not-allowed'].join(' ')}>
+                canAnswer ? 'bg-[#c46a3e] text-white shadow-md shadow-[#dcc9ba] active:scale-[0.98]'
+                          : 'bg-[#3d352a] text-[#9b8b7f] cursor-not-allowed'].join(' ')}>
               Ответить →
             </button>
           </div>
@@ -550,7 +748,7 @@ export default function Home() {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЭКРАН ТЕСТА — пошаговый
+  // Экран теста: пошаговый
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'quiz') {
     const question    = quizData[quizIndex];
@@ -560,23 +758,23 @@ export default function Home() {
     return (
       <>
         {IOSOverlay}
-        <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+        <main className="min-h-screen bg-[#1a1410] flex flex-col px-5 pt-8 pb-10">
           <div className="flex items-center justify-between mb-4">
             {quizIndex > 0
-              ? <button onClick={goToPrevQuestion} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">← Назад</button>
+              ? <button onClick={goToPrevQuestion} className="text-[#a89f94] text-sm hover:text-[#d4cfc8] transition-colors">← Назад</button>
               : <div className="w-10" />}
-            <span className="text-stone-400 text-sm">
-              Вопрос <span className="font-medium text-stone-600">{quizIndex + 1}</span> из {total}
+            <span className="text-[#a89f94] text-sm">
+              Вопрос <span className="font-medium text-[#d4cfc8]">{quizIndex + 1}</span> из {total}
             </span>
             <div className="w-10" />
           </div>
 
-          <div className="w-full h-1.5 bg-stone-100 rounded-full mb-8">
-            <div className="h-full bg-rose-300 rounded-full transition-all duration-500"
+          <div className="w-full h-1.5 bg-[#3d352a] rounded-full mb-8">
+            <div className="h-full bg-[#c46a3e] rounded-full transition-all duration-500"
               style={{ width: `${progressPct}%` }} />
           </div>
 
-          <h2 className="text-xl font-semibold text-stone-700 leading-snug mb-8 max-w-sm mx-auto">
+          <h2 className="text-xl font-semibold text-[#f5ede3] leading-snug mb-8 max-w-sm mx-auto">
             {question.question_text}
           </h2>
 
@@ -588,8 +786,8 @@ export default function Home() {
                   disabled={selectedAnswer !== null}
                   className={['w-full px-5 py-4 rounded-3xl text-left text-sm leading-snug transition-all duration-200 shadow-sm',
                     isSelected
-                      ? 'bg-rose-400 text-white shadow-rose-200 shadow-md scale-[1.01]'
-                      : 'bg-white text-stone-600 hover:bg-rose-50 active:scale-[0.98]',
+                      ? 'bg-[#c46a3e] text-white shadow-[#1a1410] shadow-md scale-[1.01]'
+                      : 'bg-[#2a2318] text-[#d4cfc8] hover:bg-[#2a2318] active:scale-[0.98]',
                     selectedAnswer !== null && !isSelected ? 'opacity-40' : '',
                   ].join(' ')}>
                   {option}
@@ -603,47 +801,32 @@ export default function Home() {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ЛОАДЕР — анализ ответов (с обработкой ошибок)
+  // Загрузка: анализ ответов (с обработкой ошибок)
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'analyzing') {
     if (analyzeError) return (
-      <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
+      <main className="min-h-screen bg-[#f9f5f0] flex flex-col items-center justify-center px-5 text-center">
         <span className="text-5xl mb-5">🌿</span>
-        <p className="text-stone-700 font-semibold text-lg mb-2">Что-то пошло не так</p>
-        <p className="text-stone-400 text-sm leading-relaxed max-w-xs mb-8">{analyzeError}</p>
+        <p className="text-[#2d2520] font-semibold text-lg mb-2">Что-то пошло не так</p>
+        <p className="text-[#8b7b6f] text-sm leading-relaxed max-w-xs mb-8">{analyzeError}</p>
         <button onClick={() => { setAnalyzeError(null); startResultGeneration(resultPayload); }}
-          className="w-full max-w-xs py-4 rounded-3xl bg-rose-400 text-white font-semibold shadow-md shadow-rose-200 mb-4">
+          className="w-full max-w-xs py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold shadow-md shadow-[#dcc9ba] mb-4">
           Попробовать снова
         </button>
-        <button onClick={goToStart} className="text-stone-400 text-sm">
+        <button onClick={goToStart} className="text-[#8b7b6f] text-sm">
           ← В начало
         </button>
       </main>
     );
 
     return (
-      <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center justify-center px-5 text-center">
-        <div className="relative mb-8">
-          <div className="w-24 h-24 rounded-full bg-rose-100 flex items-center justify-center shadow-sm">
-            <span className="text-5xl">🌷</span>
-          </div>
-          <div className="absolute inset-0 rounded-full border-2 border-rose-200 animate-ping opacity-40" />
-          <div className="absolute inset-[-8px] rounded-full border border-rose-100 animate-ping opacity-20"
-            style={{ animationDelay: '400ms' }} />
-        </div>
-        <p className="text-xl font-medium text-stone-600 mb-2">{displayMsg}</p>
-        <p className="text-stone-400 text-sm mb-10">Твой персональный разбор формируется...</p>
-        <div className="flex gap-2 mb-10">
-          <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '180ms' }} />
-          <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '360ms' }} />
-        </div>
-        {showReturnLink && (
-          <button onClick={goToStart} className="text-stone-300 text-xs underline underline-offset-2">
-            В начало
-          </button>
-        )}
-      </main>
+      <WaitScreen
+        title="Анализируем твои ответы"
+        stages={ANALYZING_STAGES}
+        stageIdx={stageIdx}
+        showReturn={showReturnLink}
+        onGoHome={goToStart}
+      />
     );
   }
 
@@ -667,21 +850,21 @@ export default function Home() {
         {showChatModal && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end justify-center p-4"
             onClick={e => { if (e.target === e.currentTarget) setShowChatModal(false); }}>
-            <div className="w-full max-w-sm bg-[#fdf8f4] rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+            <div className="w-full max-w-sm bg-[#f9f5f0] rounded-3xl shadow-2xl overflow-hidden flex flex-col"
               style={{ maxHeight: '82vh' }}>
-              <div className="flex justify-between items-center px-5 py-4 border-b border-stone-100 flex-shrink-0">
+              <div className="flex justify-between items-center px-5 py-4 border-b border-[#e8dcd0] flex-shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="text-lg">🌷</span>
-                  <span className="font-semibold text-stone-700 text-sm">ИИ-родолог</span>
+                  <span className="font-semibold text-[#2d2520] text-sm">ИИ-родолог</span>
                 </div>
                 <button onClick={() => setShowChatModal(false)}
-                  className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-stone-400 text-sm hover:bg-stone-200 transition-colors">
+                  className="w-8 h-8 rounded-full bg-[#3d352a] flex items-center justify-center text-[#8b7b6f] text-sm hover:bg-stone-200 transition-colors">
                   ✕
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto p-5">
                 {suggestedAnswers.length === 0 && (
-                  <p className="text-stone-400 text-xs text-center mb-4">Нажми на вопрос, чтобы получить ответ</p>
+                  <p className="text-[#8b7b6f] text-xs text-center mb-4">Нажми на вопрос, чтобы получить ответ</p>
                 )}
                 <div className="flex flex-col gap-2 mb-4">
                   {suggested_questions?.map((q, i) => {
@@ -693,13 +876,13 @@ export default function Home() {
                         className={[
                           'w-full px-4 py-3.5 rounded-2xl text-left text-sm leading-snug transition-all border',
                           isAsked
-                            ? 'bg-stone-50 text-stone-300 border-stone-100 cursor-default'
+                            ? 'bg-[#fff9f4] text-[#9b8b7f] border-[#e8dcd0] cursor-default'
                             : loadingQuestion !== null
-                            ? 'bg-white text-stone-300 border-stone-100 cursor-not-allowed'
-                            : 'bg-white text-stone-600 border-stone-200 hover:bg-rose-50 hover:border-rose-200 active:scale-[0.98] shadow-sm',
+                            ? 'bg-[#fff9f4] text-[#9b8b7f] border-[#e8dcd0] cursor-not-allowed'
+                            : 'bg-[#fff9f4] text-[#5a4a42] border-[#dcc9ba] hover:bg-[#fff9f4] hover:border-[#c46a3e] active:scale-[0.98] shadow-sm',
                         ].join(' ')}>
                         {isLoading
-                          ? <span className="flex items-center gap-2 text-rose-400"><span className="w-1.5 h-1.5 rounded-full bg-rose-300 animate-pulse inline-block" />Думаю...</span>
+                          ? <span className="flex items-center gap-2 text-[#c46a3e]"><span className="w-1.5 h-1.5 rounded-full bg-[#d97a4e] animate-pulse inline-block" />Думаю...</span>
                           : <span>💬 {q}</span>
                         }
                       </button>
@@ -707,9 +890,9 @@ export default function Home() {
                   })}
                 </div>
                 {suggestedAnswers.map((item, i) => (
-                  <div key={i} className="bg-white rounded-3xl rounded-tl-md p-4 border border-stone-100 shadow-sm mb-3">
-                    <p className="text-xs text-rose-400 mb-2 leading-snug">💬 {item.question}</p>
-                    <p className="text-stone-600 text-sm leading-relaxed whitespace-pre-wrap">{item.answer}</p>
+                  <div key={i} className="bg-[#fff9f4] rounded-3xl rounded-tl-md p-4 border border-[#e8dcd0] shadow-sm mb-3">
+                    <p className="text-xs text-[#c46a3e] mb-2 leading-snug">💬 {item.question}</p>
+                    <p className="text-[#5a4a42] text-sm leading-relaxed whitespace-pre-wrap">{item.answer}</p>
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -722,45 +905,45 @@ export default function Home() {
         {showLeadModal && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end justify-center p-4"
             onClick={e => { if (e.target === e.currentTarget) setShowLeadModal(false); }}>
-            <div className="w-full max-w-sm bg-white rounded-3xl shadow-2xl overflow-hidden"
+            <div className="w-full max-w-sm bg-[#fff9f4] rounded-3xl shadow-2xl overflow-hidden"
               style={{ maxHeight: '92vh', overflowY: 'auto' }}>
-              <div className="flex justify-between items-center px-5 py-4 border-b border-stone-100">
-                <h3 className="font-semibold text-stone-700">Получить рекомендацию</h3>
+              <div className="flex justify-between items-center px-5 py-4 border-b border-[#e8dcd0]">
+                <h3 className="font-semibold text-[#2d2520]">Получить рекомендацию</h3>
                 {!leadSubmitting && (
                   <button onClick={() => setShowLeadModal(false)}
-                    className="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-stone-400 text-sm">✕</button>
+                    className="w-8 h-8 rounded-full bg-[#3d352a] flex items-center justify-center text-[#8b7b6f] text-sm">✕</button>
                 )}
               </div>
               <div className="p-5 flex flex-col gap-4">
                 <p className="text-stone-500 text-sm leading-relaxed">
-                  Оставь контакты — и мы пришлём тебе конкретный первый шаг с чего начать
+                  Оставь контакты - и мы пришлём первый конкретный шаг
                 </p>
                 <input type="text" value={leadTelegram} onChange={e => setLeadTelegram(e.target.value)}
                   placeholder="Ваш ник в Telegram (@username)"
-                  className="w-full px-4 py-3.5 rounded-2xl border border-stone-200 bg-stone-50 text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300" />
+                  className="w-full px-4 py-3.5 rounded-2xl border border-[#dcc9ba] bg-[#fff9f4] text-[#2d2520] text-sm focus:outline-none focus:border-[#c46a3e] placeholder-stone-300" />
                 <input type="tel" value={leadPhone} onChange={e => setLeadPhone(e.target.value)}
                   placeholder="Ваш телефон"
-                  className="w-full px-4 py-3.5 rounded-2xl border border-stone-200 bg-stone-50 text-stone-700 text-sm focus:outline-none focus:border-rose-200 placeholder-stone-300" />
+                  className="w-full px-4 py-3.5 rounded-2xl border border-[#dcc9ba] bg-[#fff9f4] text-[#2d2520] text-sm focus:outline-none focus:border-[#c46a3e] placeholder-stone-300" />
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input type="checkbox" checked={consentData} onChange={e => setConsentData(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-rose-400" />
-                  <span className="text-stone-400 text-xs leading-relaxed">
-                    Я даю <a href="https://ifpp-inc.ru/soglasie1" target="_blank" rel="noopener noreferrer" className="text-rose-400 underline">согласие на обработку персональных данных</a> в соответствии с <a href="https://ifpp-inc.ru/politikanew" target="_blank" rel="noopener noreferrer" className="text-rose-400 underline">Политикой обработки персональных данных</a>
+                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-[#c46a3e]" />
+                  <span className="text-[#8b7b6f] text-xs leading-relaxed">
+                    Я даю <a href="https://ifpp-inc.ru/soglasie1" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">согласие на обработку персональных данных</a> в соответствии с <a href="https://ifpp-inc.ru/politikanew" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">Политикой обработки персональных данных</a>
                   </span>
                 </label>
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input type="checkbox" checked={consentMarketing} onChange={e => setConsentMarketing(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-rose-400" />
-                  <span className="text-stone-400 text-xs leading-relaxed">
-                    Я даю <a href="https://ifpp-inc.ru/soglasie2" target="_blank" rel="noopener noreferrer" className="text-rose-400 underline">согласие на получение рекламных рассылок</a>
+                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-[#c46a3e]" />
+                  <span className="text-[#8b7b6f] text-xs leading-relaxed">
+                    Я даю <a href="https://ifpp-inc.ru/soglasie2" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">согласие на получение рекламных рассылок</a>
                   </span>
                 </label>
                 <button onClick={submitLeadForm} disabled={!canSubmitLead || leadSubmitting}
                   className={[
                     'w-full py-4 rounded-3xl font-semibold text-base transition-all',
                     canSubmitLead && !leadSubmitting
-                      ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
-                      : 'bg-stone-100 text-stone-300 cursor-not-allowed',
+                      ? 'bg-[#c46a3e] text-white shadow-md shadow-[#dcc9ba] active:scale-[0.98]'
+                      : 'bg-[#3d352a] text-[#9b8b7f] cursor-not-allowed',
                   ].join(' ')}>
                   {leadSubmitting ? 'Отправляем...' : 'Получить рекомендацию →'}
                 </button>
@@ -770,41 +953,41 @@ export default function Home() {
         )}
 
         {/* ── Основной экран ────────────────────────────────────────────── */}
-        <main className="min-h-screen bg-[#fdf8f4] pb-20">
+        <main className="min-h-screen bg-[#f9f5f0] pb-20">
 
           {/* Шапка */}
           <div className="px-5 pt-8 flex items-center justify-between mb-8">
-            <button onClick={goToStart} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            <button onClick={goToStart} className="text-[#8b7b6f] text-sm hover:text-[#5a4a42] transition-colors">
               ← В начало
             </button>
-            <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+            <div className="flex items-center gap-2 bg-[#fff9f4] border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
               <span>{topicObj?.emoji}</span>
-              <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+              <span className="text-[#5a4a42] text-sm font-medium">{topicObj?.label}</span>
             </div>
           </div>
 
           {/* Заголовок разбора */}
           <div className="px-5 mb-10 max-w-sm mx-auto text-center">
-            <div className="w-14 h-14 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-4 shadow-sm">
+            <div className="w-14 h-14 rounded-full bg-[#3d352a] flex items-center justify-center mx-auto mb-4 shadow-sm">
               <span className="text-3xl">🌷</span>
             </div>
             <h2 className="text-xl font-semibold text-stone-800 mb-1.5">Твой разбор готов</h2>
-            <p className="text-stone-400 text-[13px]">Читай внимательно — это про тебя</p>
+            <p className="text-[#8b7b6f] text-[13px]">Читай внимательно - это про тебя</p>
           </div>
 
           {/* Блок 1: Вот что я вижу */}
           <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
+            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
               <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-rose-50 flex items-center justify-center flex-shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-[#fff9f4] flex items-center justify-center flex-shrink-0">
                   <span className="text-xl">🪞</span>
                 </div>
                 <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400 mb-0.5">Зеркало</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-0.5">Зеркало</p>
                   <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что я вижу</h3>
                 </div>
               </div>
-              <p className="text-stone-600 text-[15px] leading-[1.7]">{block1_see}</p>
+              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block1_see}</p>
             </div>
           </div>
 
@@ -812,7 +995,7 @@ export default function Home() {
           <div className="px-5 max-w-sm mx-auto mb-4">
             <div className="bg-gradient-to-br from-rose-50 to-amber-50 rounded-3xl px-6 py-5 shadow-sm border border-rose-100">
               <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-white/70 flex items-center justify-center flex-shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-[#fff9f4]/70 flex items-center justify-center flex-shrink-0">
                   <span className="text-xl">✨</span>
                 </div>
                 <div className="flex-1 pt-0.5">
@@ -820,36 +1003,36 @@ export default function Home() {
                   <h3 className="text-rose-700 font-semibold text-[15px] leading-snug">Вот чего ты на самом деле хочешь</h3>
                 </div>
               </div>
-              <p className="text-stone-600 text-[15px] leading-[1.7]">{block2_want}</p>
+              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block2_want}</p>
             </div>
           </div>
 
           {/* Визуализация «Разрыв» */}
           <div className="px-5 max-w-sm mx-auto mb-6">
-            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 text-center mb-5">Разрыв между реальностью и желаемым</p>
+            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f] text-center mb-5">Разрыв между реальностью и желаемым</p>
               <div className="mb-4">
                 <div className="flex justify-between text-[13px] mb-2">
-                  <span className="text-stone-400">Где сейчас</span>
+                  <span className="text-[#8b7b6f]">Где сейчас</span>
                   <span className="text-stone-500 font-semibold">{chart_gap.current}%</span>
                 </div>
-                <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden">
+                <div className="w-full h-3 bg-[#3d352a] rounded-full overflow-hidden">
                   <div className="h-full bg-gradient-to-r from-stone-200 to-stone-300 rounded-full transition-all duration-1000 ease-out"
                     style={{ width: chartsVisible ? `${chart_gap.current}%` : '0%' }} />
                 </div>
               </div>
               <div className="mb-5">
                 <div className="flex justify-between text-[13px] mb-2">
-                  <span className="text-rose-400">Где хочу быть</span>
+                  <span className="text-[#c46a3e]">Где хочу быть</span>
                   <span className="text-rose-500 font-semibold">{chart_gap.desired}%</span>
                 </div>
-                <div className="w-full h-3 bg-rose-100 rounded-full overflow-hidden">
+                <div className="w-full h-3 bg-[#3d352a] rounded-full overflow-hidden">
                   <div className="h-full bg-gradient-to-r from-rose-300 to-rose-400 rounded-full transition-all duration-1000 ease-out"
                     style={{ width: chartsVisible ? `${chart_gap.desired}%` : '0%', transitionDelay: '300ms' }} />
                 </div>
               </div>
-              <div className="flex items-center justify-center gap-2 pt-3 border-t border-stone-100">
-                <span className="text-stone-400 text-[13px]">Разрыв:</span>
+              <div className="flex items-center justify-center gap-2 pt-3 border-t border-[#e8dcd0]">
+                <span className="text-[#8b7b6f] text-[13px]">Разрыв:</span>
                 <span className="text-xl font-bold text-rose-500">{chart_gap.desired - chart_gap.current}%</span>
               </div>
             </div>
@@ -857,52 +1040,52 @@ export default function Home() {
 
           {/* Блок 3: Вот что тебя держит */}
           <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-stone-200">
+            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#dcc9ba]">
               <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-stone-100 flex items-center justify-center flex-shrink-0">
+                <div className="w-10 h-10 rounded-2xl bg-[#3d352a] flex items-center justify-center flex-shrink-0">
                   <span className="text-xl">⚓</span>
                 </div>
                 <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 mb-0.5">Корень</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f] mb-0.5">Корень</p>
                   <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что тебя держит</h3>
                 </div>
               </div>
-              <p className="text-stone-600 text-[15px] leading-[1.7]">{block3_hold}</p>
+              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block3_hold}</p>
             </div>
           </div>
 
           {/* Визуализация «Корень» */}
           <div className="px-5 max-w-sm mx-auto mb-6">
             <div className="flex flex-col items-center">
-              <div className="w-full bg-stone-50 border border-stone-200 rounded-2xl px-5 py-4">
+              <div className="w-full bg-[#fff9f4] border border-[#dcc9ba] rounded-2xl px-5 py-4">
                 <div className="flex items-center gap-2 mb-1.5">
                   <div className="w-2 h-2 rounded-full bg-stone-300 flex-shrink-0" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400">Снаружи</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f]">Снаружи</span>
                 </div>
                 <p className="text-stone-500 text-[14px]">{chart_root.surface}</p>
               </div>
               <div className="w-px h-4 bg-gradient-to-b from-stone-200 to-rose-200" />
-              <div className="w-full bg-rose-50 border border-rose-100 rounded-2xl px-5 py-4">
+              <div className="w-full bg-[#fff9f4] border border-rose-100 rounded-2xl px-5 py-4">
                 <div className="flex items-center gap-2 mb-1.5">
-                  <div className="w-2 h-2 rounded-full bg-rose-300 flex-shrink-0" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400">Глубже</span>
+                  <div className="w-2 h-2 rounded-full bg-[#d97a4e] flex-shrink-0" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e]">Глубже</span>
                 </div>
-                <p className="text-stone-600 text-[14px]">{chart_root.deep}</p>
+                <p className="text-[#5a4a42] text-[14px]">{chart_root.deep}</p>
               </div>
               <div className="w-px h-4 bg-gradient-to-b from-rose-200 to-rose-400" />
-              <div className="w-full bg-gradient-to-br from-rose-100 to-rose-50 border border-rose-200 rounded-2xl px-5 py-5">
+              <div className="w-full bg-gradient-to-br from-rose-100 to-rose-50 border border-[#c46a3e] rounded-2xl px-5 py-5">
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-base">🌱</span>
                   <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-500">Родовой корень</span>
                 </div>
-                <p className="text-stone-700 text-[14px] font-semibold">{chart_root.root}</p>
+                <p className="text-[#2d2520] text-[14px] font-semibold">{chart_root.root}</p>
               </div>
             </div>
           </div>
 
           {/* Блок 4: Вот что ты теряешь */}
           <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-white rounded-3xl px-6 py-5 shadow-sm border border-amber-100">
+            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-amber-100">
               <div className="flex items-start gap-3 mb-4">
                 <div className="w-10 h-10 rounded-2xl bg-amber-50 flex items-center justify-center flex-shrink-0">
                   <span className="text-xl">⏳</span>
@@ -912,14 +1095,14 @@ export default function Home() {
                   <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что ты теряешь</h3>
                 </div>
               </div>
-              <p className="text-stone-600 text-[15px] leading-[1.7]">{block4_lose}</p>
+              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block4_lose}</p>
             </div>
           </div>
 
-          {/* Кнопка ИИ-чата — скрыта, раскомментировать если нужно
+          {/* Кнопка ИИ-чата скрыта, раскомментировать если нужно
           <div className="px-5 max-w-sm mx-auto mb-6 text-center">
             <button onClick={() => setShowChatModal(true)}
-              className="inline-flex items-center gap-2 text-rose-400 text-sm hover:text-rose-500 transition-colors">
+              className="inline-flex items-center gap-2 text-[#c46a3e] text-sm hover:text-rose-500 transition-colors">
               <span>💬</span>
               <span className="underline underline-offset-2">Задать вопрос ИИ-родологу</span>
             </button>
@@ -930,19 +1113,19 @@ export default function Home() {
           {!showActionStep && (
             <div className="px-5 max-w-sm mx-auto flex flex-col gap-3 mb-8">
               <button onClick={() => setShowLeadModal(true)}
-                className="w-full py-4 rounded-3xl bg-white text-stone-600 font-medium text-sm border border-stone-200 active:scale-[0.98] transition-transform shadow-sm leading-snug text-left px-5">
+                className="w-full py-4 rounded-3xl bg-[#fff9f4] text-[#5a4a42] font-medium text-sm border border-[#dcc9ba] active:scale-[0.98] transition-transform shadow-sm leading-snug text-left px-5">
                 Как выйти из этой ситуации сегодня?
               </button>
               {cta_button_targeted && (
                 <button onClick={() => setShowLeadModal(true)}
-                  className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform leading-snug px-5 text-left">
+                  className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform leading-snug px-5 text-left">
                   {cta_button_targeted}
                 </button>
               )}
             </div>
           )}
 
-          {/* Блок 5 + финальный оффер — плавно раскрываются после отправки лид-формы */}
+          {/* Блок 5 + финальный оффер раскрываются после отправки формы */}
           <div ref={revealSectionRef} style={{
             maxHeight: showActionStep ? '1400px' : '0px',
             opacity:   showActionStep ? 1 : 0,
@@ -950,32 +1133,32 @@ export default function Home() {
             transition: 'max-height 0.75s ease-in-out, opacity 0.5s ease-in-out 0.1s',
           }}>
             <div className="px-5 max-w-sm mx-auto mb-4 pt-2">
-              <div className="bg-gradient-to-br from-stone-50 to-white rounded-3xl px-6 py-5 shadow-sm border border-stone-100">
+              <div className="bg-gradient-to-br from-stone-50 to-white rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
                 <div className="flex items-start gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-2xl bg-white border border-stone-100 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-2xl bg-[#fff9f4] border border-[#e8dcd0] flex items-center justify-center flex-shrink-0">
                     <span className="text-xl">🔍</span>
                   </div>
                   <div className="flex-1 pt-0.5">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-stone-400 mb-0.5">Направление</p>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f] mb-0.5">Направление</p>
                     <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Куда копать</h3>
                   </div>
                 </div>
-                <p className="text-stone-600 text-[15px] leading-[1.7]">{block5_dig}</p>
+                <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block5_dig}</p>
               </div>
             </div>
 
             <div className="px-5 max-w-sm mx-auto mb-8">
-              <div className="bg-white rounded-3xl px-6 py-5 border border-stone-100 shadow-sm">
-                <p className="text-stone-700 font-semibold text-center text-[15px] mb-5">
+              <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 border border-[#e8dcd0] shadow-sm">
+                <p className="text-[#2d2520] font-semibold text-center text-[15px] mb-5">
                   Хотите записаться на разбор со специалистом?
                 </p>
                 <div className="flex flex-col gap-3">
                   <button onClick={handleYesConsultation}
-                    className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform">
+                    className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform">
                     Да, хочу →
                   </button>
                   <button onClick={() => { setAnswers([]); setScreen('telegram'); }}
-                    className="w-full py-3 rounded-3xl text-stone-400 text-sm active:scale-[0.98] transition-transform">
+                    className="w-full py-3 rounded-3xl text-[#8b7b6f] text-sm active:scale-[0.98] transition-transform">
                     Нет, удалите мои ответы
                   </button>
                 </div>
@@ -996,28 +1179,28 @@ export default function Home() {
     const showCta      = limitReached && !isChatLoading;
 
     return (
-      <main className="h-screen bg-[#fdf8f4] flex flex-col overflow-hidden">
+      <main className="h-screen bg-[#f9f5f0] flex flex-col overflow-hidden">
 
         {/* Шапка */}
-        <div className="flex-shrink-0 px-5 pt-8 pb-4 flex items-center justify-between border-b border-stone-100 bg-[#fdf8f4]">
+        <div className="flex-shrink-0 px-5 pt-8 pb-4 flex items-center justify-between border-b border-[#e8dcd0] bg-[#f9f5f0]">
           <button onClick={() => setScreen('result')}
-            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            className="text-[#8b7b6f] text-sm hover:text-[#5a4a42] transition-colors">
             ← Назад
           </button>
-          <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+          <div className="flex items-center gap-2 bg-[#fff9f4] border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
             <span>{topicObj?.emoji}</span>
-            <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+            <span className="text-[#5a4a42] text-sm font-medium">{topicObj?.label}</span>
           </div>
         </div>
 
         {/* Аватар */}
-        <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3 border-b border-stone-100 bg-[#fdf8f4]">
-          <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shadow-sm flex-shrink-0">
+        <div className="flex-shrink-0 flex items-center gap-3 px-5 py-3 border-b border-[#e8dcd0] bg-[#f9f5f0]">
+          <div className="w-10 h-10 rounded-full bg-[#3d352a] flex items-center justify-center shadow-sm flex-shrink-0">
             <span className="text-xl">🌷</span>
           </div>
           <div>
-            <p className="text-stone-700 text-sm font-medium">ИИ-ассистент</p>
-            <p className="text-stone-400 text-xs">Родовой разбор</p>
+            <p className="text-[#2d2520] text-sm font-medium">ИИ-ассистент</p>
+            <p className="text-[#8b7b6f] text-xs">Родовой разбор</p>
           </div>
         </div>
 
@@ -1028,8 +1211,8 @@ export default function Home() {
               <div className={[
                 'max-w-[85%] px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap',
                 msg.role === 'user'
-                  ? 'bg-rose-400 text-white rounded-3xl rounded-tr-md'
-                  : 'bg-white text-stone-600 border border-stone-100 shadow-sm rounded-3xl rounded-tl-md',
+                  ? 'bg-[#c46a3e] text-white rounded-3xl rounded-tr-md'
+                  : 'bg-[#fff9f4] text-[#5a4a42] border border-[#e8dcd0] shadow-sm rounded-3xl rounded-tl-md',
               ].join(' ')}>
                 {msg.content}
               </div>
@@ -1038,10 +1221,10 @@ export default function Home() {
 
           {isChatLoading && (
             <div className="flex justify-start">
-              <div className="bg-white border border-stone-100 shadow-sm px-5 py-4 rounded-3xl rounded-tl-md flex gap-1.5 items-center">
-                <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 rounded-full bg-rose-200 animate-bounce" style={{ animationDelay: '300ms' }} />
+              <div className="bg-[#fff9f4] border border-[#e8dcd0] shadow-sm px-5 py-4 rounded-3xl rounded-tl-md flex gap-1.5 items-center">
+                <span className="w-2 h-2 rounded-full bg-[#e8dcd0] animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 rounded-full bg-[#e8dcd0] animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 rounded-full bg-[#e8dcd0] animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
             </div>
           )}
@@ -1051,10 +1234,10 @@ export default function Home() {
 
         {/* CTA после 3 вопросов */}
         {showCta && (
-          <div className="flex-shrink-0 px-5 pt-2 pb-3 bg-[#fdf8f4]">
+          <div className="flex-shrink-0 px-5 pt-2 pb-3 bg-[#f9f5f0]">
             <button
               onClick={() => setScreen('offer')}
-              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform"
+              className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform"
             >
               Узнать, что делать дальше →
             </button>
@@ -1062,9 +1245,9 @@ export default function Home() {
         )}
 
         {/* Поле ввода */}
-        <div className="flex-shrink-0 px-4 py-3 bg-white border-t border-stone-100">
+        <div className="flex-shrink-0 px-4 py-3 bg-[#fff9f4] border-t border-[#e8dcd0]">
           {limitReached ? (
-            <div className="w-full px-4 py-3 rounded-2xl bg-stone-50 text-stone-300 text-sm text-center border border-stone-100">
+            <div className="w-full px-4 py-3 rounded-2xl bg-[#fff9f4] text-[#9b8b7f] text-sm text-center border border-[#e8dcd0]">
               Лимит бесплатных вопросов исчерпан
             </div>
           ) : (
@@ -1076,12 +1259,12 @@ export default function Home() {
                 placeholder="Задай вопрос по разбору..."
                 disabled={isChatLoading}
                 rows={1}
-                className="flex-1 px-4 py-3 rounded-2xl border border-stone-200 bg-stone-50 text-stone-700 text-sm resize-none focus:outline-none focus:border-rose-200 placeholder-stone-300 disabled:opacity-40 max-h-28 overflow-y-auto"
+                className="flex-1 px-4 py-3 rounded-2xl border border-[#dcc9ba] bg-[#fff9f4] text-[#2d2520] text-sm resize-none focus:outline-none focus:border-[#c46a3e] placeholder-stone-300 disabled:opacity-40 max-h-28 overflow-y-auto"
               />
               <button
                 onClick={sendChatMessage}
                 disabled={!chatInput.trim() || isChatLoading}
-                className="w-11 h-11 rounded-2xl bg-rose-400 text-white flex items-center justify-center flex-shrink-0 shadow-sm active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                className="w-11 h-11 rounded-2xl bg-[#c46a3e] text-white flex items-center justify-center flex-shrink-0 shadow-sm active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="22" y1="2" x2="11" y2="13" />
@@ -1102,24 +1285,24 @@ export default function Home() {
   if (screen === 'offer') return (
     <>
       {IOSOverlay}
-      <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+      <main className="min-h-screen bg-[#f9f5f0] flex flex-col px-5 pt-8 pb-10">
         <div className="flex items-center justify-between mb-10">
           <button onClick={() => setScreen('chat')}
-            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            className="text-[#8b7b6f] text-sm hover:text-[#5a4a42] transition-colors">
             ← Назад
           </button>
-          <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+          <div className="flex items-center gap-2 bg-[#fff9f4] border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
             <span>{topicObj?.emoji}</span>
-            <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+            <span className="text-[#5a4a42] text-sm font-medium">{topicObj?.label}</span>
           </div>
         </div>
 
         <div className="flex flex-col max-w-sm mx-auto w-full flex-1">
           <div className="text-center mb-8">
-            <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center mx-auto mb-5 shadow-sm">
+            <div className="w-16 h-16 rounded-full bg-[#3d352a] flex items-center justify-center mx-auto mb-5 shadow-sm">
               <span className="text-3xl">🌱</span>
             </div>
-            <h2 className="text-2xl font-semibold text-stone-700 leading-snug mb-4">
+            <h2 className="text-2xl font-semibold text-[#2d2520] leading-snug mb-4">
               Твой родовой сценарий<br />поддаётся проработке
             </h2>
             <p className="text-stone-500 text-sm leading-relaxed">
@@ -1128,11 +1311,11 @@ export default function Home() {
           </div>
 
           {resultData?.ancestral_block && (
-            <div className="bg-white rounded-3xl p-5 shadow-sm border border-rose-50 mb-8">
-              <p className="text-xs text-stone-400 uppercase tracking-wide mb-3">Что стоит за твоей ситуацией</p>
+            <div className="bg-[#fff9f4] rounded-3xl p-5 shadow-sm border border-rose-50 mb-8">
+              <p className="text-xs text-[#8b7b6f] uppercase tracking-wide mb-3">Что стоит за твоей ситуацией</p>
               <div className="flex items-start gap-3">
                 <span className="text-xl flex-shrink-0">🔗</span>
-                <p className="text-stone-600 text-sm leading-relaxed italic">
+                <p className="text-[#5a4a42] text-sm leading-relaxed italic">
                   «{resultData.ancestral_block.split('.')[0]}»
                 </p>
               </div>
@@ -1141,11 +1324,11 @@ export default function Home() {
 
           <div className="flex flex-col gap-3 mt-auto">
             <button onClick={() => setScreen('assistant')}
-              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform leading-snug">
+              className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform leading-snug">
               Записаться на разбор<br />к ассистенту эксперта →
             </button>
             <button onClick={() => setScreen('telegram')}
-              className="w-full py-4 rounded-3xl bg-white text-stone-500 font-medium text-sm border border-stone-200 active:scale-[0.98] transition-transform shadow-sm">
+              className="w-full py-4 rounded-3xl bg-[#fff9f4] text-stone-500 font-medium text-sm border border-[#dcc9ba] active:scale-[0.98] transition-transform shadow-sm">
               Я пока хочу изучить тему самостоятельно
             </button>
           </div>
@@ -1160,27 +1343,27 @@ export default function Home() {
   if (screen === 'assistant') return (
     <>
       {IOSOverlay}
-      <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+      <main className="min-h-screen bg-[#f9f5f0] flex flex-col px-5 pt-8 pb-10">
         <div className="flex items-center mb-10">
           <button onClick={() => setScreen(resultData ? 'result' : 'offer')}
-            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            className="text-[#8b7b6f] text-sm hover:text-[#5a4a42] transition-colors">
             ← Назад
           </button>
         </div>
 
         <div className="flex flex-col items-center text-center max-w-sm mx-auto w-full flex-1">
-          <div className="w-20 h-20 rounded-full bg-rose-100 flex items-center justify-center mb-6 shadow-sm">
+          <div className="w-20 h-20 rounded-full bg-[#3d352a] flex items-center justify-center mb-6 shadow-sm">
             <span className="text-4xl">🌷</span>
           </div>
-          <h2 className="text-2xl font-semibold text-stone-700 mb-3 leading-snug">
+          <h2 className="text-2xl font-semibold text-[#2d2520] mb-3 leading-snug">
             Прекрасный выбор!
           </h2>
           <p className="text-stone-500 text-sm leading-relaxed max-w-xs mb-5">
             Переходим в Telegram для связи с ассистентом эксперта.
           </p>
 
-          <div className="bg-rose-50 border border-rose-100 rounded-3xl px-5 py-4 mb-10 w-full text-left">
-            <p className="text-stone-600 text-sm leading-relaxed">
+          <div className="bg-[#fff9f4] border border-rose-100 rounded-3xl px-5 py-4 mb-10 w-full text-left">
+            <p className="text-[#5a4a42] text-sm leading-relaxed">
               Напиши в чат кодовое слово{' '}
               <span className="font-bold text-rose-500">«РОД»</span>,
               чтобы зафиксировать за собой место на бесплатный разбор.
@@ -1189,10 +1372,10 @@ export default function Home() {
 
           <div className="w-full flex flex-col gap-3 mt-auto">
             <a href="https://t.me/assistant_username_placeholder" target="_blank" rel="noopener noreferrer"
-              className="w-full py-4 rounded-3xl bg-rose-400 text-white font-semibold text-base shadow-md shadow-rose-200 active:scale-[0.98] transition-transform text-center block">
+              className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform text-center block">
               Открыть Telegram ассистента →
             </a>
-            <button onClick={goToStart} className="text-stone-400 text-sm py-2">
+            <button onClick={goToStart} className="text-[#8b7b6f] text-sm py-2">
               ← В начало
             </button>
           </div>
@@ -1207,10 +1390,10 @@ export default function Home() {
   if (screen === 'telegram') return (
     <>
       {IOSOverlay}
-      <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+      <main className="min-h-screen bg-[#f9f5f0] flex flex-col px-5 pt-8 pb-10">
         <div className="flex items-center mb-10">
           <button onClick={() => setScreen(resultData ? 'result' : 'offer')}
-            className="text-stone-400 text-sm hover:text-stone-600 transition-colors">
+            className="text-[#8b7b6f] text-sm hover:text-[#5a4a42] transition-colors">
             ← Назад
           </button>
         </div>
@@ -1219,7 +1402,7 @@ export default function Home() {
           <div className="w-20 h-20 rounded-full bg-[#e8f4fd] flex items-center justify-center mb-6 shadow-sm">
             <span className="text-4xl">✈️</span>
           </div>
-          <h2 className="text-2xl font-semibold text-stone-700 mb-3 leading-snug">
+          <h2 className="text-2xl font-semibold text-[#2d2520] mb-3 leading-snug">
             Добро пожаловать<br />в сообщество
           </h2>
           <p className="text-stone-500 text-sm leading-relaxed max-w-xs mb-10">
@@ -1231,7 +1414,7 @@ export default function Home() {
               className="w-full py-4 rounded-3xl bg-[#229ED9] text-white font-semibold text-base shadow-md active:scale-[0.98] transition-transform text-center block">
               Войти в Telegram-канал →
             </a>
-            <button onClick={goToStart} className="text-stone-400 text-sm py-2">
+            <button onClick={goToStart} className="text-[#8b7b6f] text-sm py-2">
               ← В начало
             </button>
           </div>
@@ -1249,39 +1432,39 @@ export default function Home() {
       <>
         {IOSOverlay}
         {InAppBanner}
-        <main className="min-h-screen bg-[#fdf8f4] flex flex-col px-5 pt-8 pb-10">
+        <main className="min-h-screen bg-[#f9f5f0] flex flex-col px-5 pt-8 pb-10">
           <div className="flex items-center justify-between mb-8">
-            <button onClick={goBack} className="text-stone-400 text-sm hover:text-stone-600 transition-colors">← Назад</button>
-            <div className="flex items-center gap-2 bg-white border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
+            <button onClick={goBack} className="text-[#8b7b6f] text-sm hover:text-[#5a4a42] transition-colors">← Назад</button>
+            <div className="flex items-center gap-2 bg-[#fff9f4] border border-rose-100 rounded-2xl px-3 py-1.5 shadow-sm">
               <span>{topicObj?.emoji}</span>
-              <span className="text-stone-600 text-sm font-medium">{topicObj?.label}</span>
+              <span className="text-[#5a4a42] text-sm font-medium">{topicObj?.label}</span>
             </div>
           </div>
 
-          <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center mb-5 shadow-sm mx-auto">
+          <div className="w-12 h-12 rounded-full bg-[#3d352a] flex items-center justify-center mb-5 shadow-sm mx-auto">
             <span className="text-2xl">🌷</span>
           </div>
 
-          <p className="text-stone-600 text-center text-sm leading-relaxed mb-6 max-w-sm mx-auto">
+          <p className="text-[#5a4a42] text-center text-sm leading-relaxed mb-6 max-w-sm mx-auto">
             Я помогу тебе разобраться. Чем подробнее ты опишешь, что сейчас происходит
             в этой сфере, тем точнее ИИ сможет подсветить родовые сценарии.
           </p>
 
           <textarea value={text} onChange={e => setText(e.target.value)}
             placeholder="Опиши свою ситуацию..."
-            className="w-full max-w-sm mx-auto rounded-3xl border border-stone-200 bg-white p-5 text-stone-700 text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-rose-200 shadow-sm min-h-[180px]" />
+            className="w-full max-w-sm mx-auto rounded-3xl border border-[#dcc9ba] bg-[#fff9f4] p-5 text-[#2d2520] text-sm leading-relaxed placeholder-stone-300 resize-none focus:outline-none focus:border-[#c46a3e] shadow-sm min-h-[180px]" />
 
           <MicRow setter={setText} />
 
           <div className="w-full max-w-sm mx-auto mt-auto">
             <button onClick={handleContinue} disabled={!canContinue}
               className={['w-full py-4 rounded-3xl font-semibold text-lg transition-all duration-200',
-                canContinue ? 'bg-rose-400 text-white shadow-md shadow-rose-200 active:scale-[0.98]'
-                            : 'bg-stone-100 text-stone-300 cursor-not-allowed'].join(' ')}>
+                canContinue ? 'bg-[#c46a3e] text-white shadow-md shadow-[#dcc9ba] active:scale-[0.98]'
+                            : 'bg-[#3d352a] text-[#9b8b7f] cursor-not-allowed'].join(' ')}>
               Продолжить →
             </button>
             {(isRecording || isTranscribing) && (
-              <p className="text-center text-xs text-stone-400 mt-2">
+              <p className="text-center text-xs text-[#8b7b6f] mt-2">
                 {isRecording ? 'Остановите запись перед продолжением' : 'Подождите, идёт распознавание...'}
               </p>
             )}
@@ -1298,23 +1481,23 @@ export default function Home() {
     <>
       {IOSOverlay}
       {InAppBanner}
-      <main className="min-h-screen bg-[#fdf8f4] flex flex-col items-center px-5 pt-12 pb-10">
-        <div className="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center mb-6 shadow-sm">
+      <main className="min-h-screen bg-[#f9f5f0] flex flex-col items-center px-5 pt-12 pb-10">
+        <div className="w-16 h-16 rounded-full bg-[#3d352a] flex items-center justify-center mb-6 shadow-sm">
           <span className="text-3xl">🌷</span>
         </div>
-        <h1 className="text-2xl font-semibold text-stone-700 text-center leading-snug mb-2">
-          [Здесь будет приветствие эксперта-родолога]
+        <h1 className="text-2xl font-semibold text-[#2d2520] text-center leading-snug mb-3">
+          О чём ты думаешь чаще всего прямо сейчас?
         </h1>
-        <p className="text-stone-400 text-sm text-center mb-10">
-          Выбери тему, которая тебя волнует сейчас
+        <p className="text-[#8b7b6f] text-sm text-center leading-relaxed mb-10 max-w-xs">
+          Выбери ту сферу, куда мысли возвращаются снова и снова — где есть тревога, застревание или ощущение, что что-то идёт не так. Не думай долго. Первый отклик — самый точный.
         </p>
         <div className="w-full max-w-sm flex flex-col gap-4">
           {TOPICS.map((t) => (
             <button key={t.id} onClick={() => selectTopic(t.id)}
               className={['w-full flex items-center gap-4 px-6 py-5 rounded-3xl text-left transition-all duration-200 shadow-sm',
                 topic === t.id
-                  ? 'bg-rose-400 text-white shadow-rose-200 shadow-md scale-[1.02]'
-                  : 'bg-white text-stone-600 hover:bg-rose-50 active:scale-[0.98]',
+                  ? 'bg-[#c46a3e] text-white shadow-[#dcc9ba] shadow-md scale-[1.02]'
+                  : 'bg-[#fff9f4] text-[#5a4a42] hover:bg-[#fff9f4] active:scale-[0.98]',
               ].join(' ')}>
               <span className="text-2xl">{t.emoji}</span>
               <span className="text-lg font-medium">{t.label}</span>
