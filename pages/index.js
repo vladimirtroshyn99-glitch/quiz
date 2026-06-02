@@ -105,6 +105,8 @@ export default function Home() {
   const [quizIndex, setQuizIndex]                 = useState(0);
   const [answers, setAnswers]                     = useState([]);
   const [selectedAnswer, setSelectedAnswer]       = useState(null);
+  const [multiSelected, setMultiSelected]         = useState(new Set());
+  const [scaleValue, setScaleValue]               = useState(3);
   const [resultData, setResultData]               = useState(null);
   const [resultPayload, setResultPayload]         = useState(null);
   const [analyzeError, setAnalyzeError]           = useState(null);
@@ -123,7 +125,8 @@ export default function Home() {
   const [suggestedAnswers, setSuggestedAnswers]   = useState([]);
   const [loadingQuestion, setLoadingQuestion]     = useState(null);
   const [showChatModal, setShowChatModal]         = useState(false);
-  const [showLeadModal, setShowLeadModal]         = useState(false);
+  const [selectedQuestion, setSelectedQuestion]   = useState(null);
+  const [leadName, setLeadName]                   = useState('');
   const [leadTelegram, setLeadTelegram]           = useState('');
   const [leadPhone, setLeadPhone]                 = useState('');
   const [consentData, setConsentData]             = useState(false);
@@ -131,6 +134,11 @@ export default function Home() {
   const [leadSubmitting, setLeadSubmitting]       = useState(false);
   const [showActionStep, setShowActionStep]       = useState(false);
   const [stageIdx, setStageIdx]                   = useState(-1);
+  const [meetingFormOpen, setMeetingFormOpen]     = useState(false);
+  const [meetingName, setMeetingName]             = useState('');
+  const [meetingPhone, setMeetingPhone]           = useState('');
+  const [meetingSubmitting, setMeetingSubmitting] = useState(false);
+  const [meetingSubmitted, setMeetingSubmitted]   = useState(false);
   const mediaRecorderRef                          = useRef(null);
   const chunksRef                                 = useRef([]);
   const messagesEndRef                            = useRef(null);
@@ -210,7 +218,7 @@ export default function Home() {
   function startStages(stages) {
     clearTimeout(stageTimerRef.current);
     stageIdxRef.current = 0;
-    stageSpeedRef.current = 2500;
+    stageSpeedRef.current = 4500;
     aiDoneRef.current = false;
     aiProceedFnRef.current = null;
     setStageIdx(0);
@@ -272,6 +280,8 @@ export default function Home() {
     setQuizIndex(0);
     setAnswers([]);
     setSelectedAnswer(null);
+    setMultiSelected(new Set());
+    setScaleValue(3);
     setResultData(null);
     setResultPayload(null);
     setAnalyzeError(null);
@@ -293,42 +303,69 @@ export default function Home() {
   }
 
   // ─── Логика теста ─────────────────────────────────────────────────────────
+  function advanceQuiz(newAnswer) {
+    const newAnswers = [...answers, newAnswer];
+    setAnswers(newAnswers);
+    setSelectedAnswer(null);
+    setMultiSelected(new Set());
+    setScaleValue(3);
+
+    if (quizIndex < quizData.length - 1) {
+      setQuizIndex(prev => prev + 1);
+    } else {
+      const topicObj = TOPICS.find(t => t.id === topic);
+      const payload  = {
+        sphere:        topicObj.label,
+        query:         text,
+        clarification: clarificationText,
+        answers:       newAnswers,
+      };
+      setResultPayload(payload);
+      setAnalyzeError(null);
+      setScreen('analyzing');
+      startResultGeneration(payload);
+    }
+  }
+
   function selectAnswer(optionIndex) {
     if (selectedAnswer !== null) return;
     setSelectedAnswer(optionIndex);
-
+    const question = quizData[quizIndex];
     setTimeout(() => {
-      const question   = quizData[quizIndex];
-      const newAnswer  = {
+      advanceQuiz({
         questionId:     question.id,
         question:       question.question_text,
         selectedOption: question.options[optionIndex],
-      };
-      const newAnswers = [...answers, newAnswer];
-      setAnswers(newAnswers);
-      setSelectedAnswer(null);
+      });
+    }, 500);
+  }
 
-      if (quizIndex < quizData.length - 1) {
-        setQuizIndex(prev => prev + 1);
-      } else {
-        const topicObj = TOPICS.find(t => t.id === topic);
-        const payload  = {
-          sphere:        topicObj.label,
-          query:         text,
-          clarification: clarificationText,
-          answers:       newAnswers,
-        };
-        setResultPayload(payload);
-        setAnalyzeError(null);
-        setScreen('analyzing');
-        startResultGeneration(payload);
-      }
-    }, 380);
+  function handleMultiNext() {
+    const question = quizData[quizIndex];
+    const selected = question.options.filter((_, i) => multiSelected.has(i));
+    advanceQuiz({
+      questionId:      question.id,
+      question:        question.question_text,
+      selectedOptions: selected,
+    });
+  }
+
+  function handleScaleNext() {
+    const question = quizData[quizIndex];
+    advanceQuiz({
+      questionId:  question.id,
+      question:    question.question_text,
+      scaleValue,
+      scale_left:  question.scale_left,
+      scale_right: question.scale_right,
+    });
   }
 
   function goToPrevQuestion() {
     if (quizIndex === 0 || selectedAnswer !== null) return;
     setAnswers(prev => prev.slice(0, -1));
+    setMultiSelected(new Set());
+    setScaleValue(3);
     setQuizIndex(prev => prev - 1);
   }
 
@@ -436,11 +473,10 @@ export default function Home() {
       await fetch('/api/vakas', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ telegram: leadTelegram, phone: leadPhone, sphere: topicLabel, query: text }),
+        body:    JSON.stringify({ name: leadName, telegram: leadTelegram, phone: leadPhone, sphere: topicLabel, query: text }),
       });
     } catch { /* fail silently */ }
     setLeadSubmitting(false);
-    setShowLeadModal(false);
     setShowActionStep(true);
     setTimeout(() => revealSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
   }
@@ -461,7 +497,23 @@ export default function Home() {
         }),
       });
     } catch { /* fail silently */ }
-    setScreen('assistant');
+    setScreen('meeting');
+  }
+
+  // ─── Форма встречи ───────────────────────────────────────────────────────
+  async function handleMeetingSubmit() {
+    if (meetingSubmitting) return;
+    setMeetingSubmitting(true);
+    try {
+      const topicLabel = TOPICS.find(t => t.id === topic)?.label;
+      await fetch('/api/vakas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: meetingName, phone: meetingPhone, sphere: topicLabel, intent: 'meeting_booking' }),
+      });
+    } catch { /* fail silently */ }
+    setMeetingSubmitting(false);
+    setMeetingSubmitted(true);
   }
 
   // ─── Инлайн-вопросы на экране результатов ────────────────────────────────
@@ -608,44 +660,44 @@ export default function Home() {
       'Получи разбор прямо на экране',
     ];
     const benefits = [
-      { icon: '🔎', text: 'Увидишь сценарий рода, который работает именно у тебя — по деньгам, отношениям или самореализации' },
+      { icon: '🔎', text: 'Увидишь сценарий рода, который работает именно у тебя' },
       { icon: '🔗', text: 'Поймёшь связь между тем, что происходит сейчас, и тем, что было в семье' },
       { icon: '🧭', text: 'Получишь конкретный вектор — что с этим можно сделать' },
     ];
     return (
-      <main className="min-h-screen bg-[#f9f5f0] flex flex-col items-center px-5 pt-12 pb-14">
+      <main className="min-h-screen bg-[#1a1410] flex flex-col items-center px-5 pt-12 pb-14">
         <div className="w-full max-w-sm mx-auto flex flex-col items-center">
 
           {/* Шапка эксперта */}
           <div
-            className="w-[72px] h-[72px] rounded-full flex items-center justify-center mb-3 shadow-md text-white font-bold text-xl"
+            className="w-[72px] h-[72px] rounded-full flex items-center justify-center mb-3 shadow-lg text-white font-bold text-xl"
             style={{ background: 'linear-gradient(145deg, #7C3069, #c46a3e)' }}
           >КМ</div>
-          <h2 className="text-[17px] font-semibold text-[#2d2520] mb-1">Ксения Мосунова</h2>
+          <h2 className="text-[17px] font-semibold text-[#f5ede3] mb-1">Ксения Мосунова</h2>
           <p className="text-[11px] font-semibold tracking-[0.14em] uppercase text-[#c46a3e] mb-8">
             Психогенеалог
           </p>
 
           {/* Заголовок */}
-          <h1 className="text-[26px] font-semibold text-[#2d2520] text-center leading-tight mb-3">
+          <h1 className="text-[26px] font-semibold text-[#f5ede3] text-center leading-tight mb-3">
             Почему одно и то же повторяется{' '}
             <span className="text-[#c46a3e] italic">и что с этим делать</span>
           </h1>
-          <p className="text-sm text-[#8b7b6f] text-center leading-relaxed mb-6">
+          <p className="text-sm text-[#a89f94] text-center leading-relaxed mb-6">
             Разберём твою ситуацию через сценарии рода и найдём точку входа
           </p>
 
           {/* Теги */}
           <div className="flex flex-wrap gap-2 justify-center mb-8">
             {['4 шага', '5 минут', 'разбор сразу на экране'].map((tag) => (
-              <span key={tag} className="px-4 py-1.5 rounded-full bg-[#fff9f4] border border-[#e8dcd0] text-[#8b7b6f] text-xs">
+              <span key={tag} className="px-4 py-1.5 rounded-full bg-[#2a2318] border border-[#3d352a] text-[#a89f94] text-xs">
                 {tag}
               </span>
             ))}
           </div>
 
           {/* Как это работает */}
-          <div className="w-full bg-[#1a1410] rounded-3xl px-5 py-5 mb-4 shadow-sm">
+          <div className="w-full bg-[#2a2318] border border-[#3d352a] rounded-3xl px-5 py-5 mb-4">
             <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-[#c46a3e] mb-4">
               Как это работает
             </p>
@@ -655,7 +707,7 @@ export default function Home() {
                   <div className="w-[22px] h-[22px] rounded-full bg-[#c46a3e] flex items-center justify-center flex-shrink-0 text-white text-[11px] font-bold">
                     {i + 1}
                   </div>
-                  <p className="text-[#f5ede3] text-sm leading-snug">{s}</p>
+                  <p className="text-[#d4cfc8] text-sm leading-snug">{s}</p>
                 </div>
               ))}
             </div>
@@ -664,24 +716,24 @@ export default function Home() {
           {/* Блоки пользы */}
           <div className="w-full flex flex-col gap-3 mb-10">
             {benefits.map((b, i) => (
-              <div key={i} className="w-full bg-[#fff9f4] border border-[#e8dcd0] rounded-2xl px-4 py-4 flex items-start gap-3 shadow-sm">
+              <div key={i} className="w-full bg-[#2a2318] border border-[#3d352a] rounded-2xl px-4 py-4 flex items-start gap-3">
                 <span className="text-xl flex-shrink-0 leading-none">{b.icon}</span>
-                <p className="text-[#5a4a42] text-sm leading-relaxed">{b.text}</p>
+                <p className="text-[#a89f94] text-sm leading-relaxed">{b.text}</p>
               </div>
             ))}
           </div>
 
           {/* Кнопка */}
-          <p className="text-[17px] font-semibold text-[#2d2520] text-center leading-snug mb-4">
+          <p className="text-[17px] font-semibold text-[#f5ede3] text-center leading-snug mb-4">
             Узнай, что тебя держит — и как это можно изменить
           </p>
           <button
             onClick={() => setScreen('start')}
-            className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base text-center shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform mb-3"
+            className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base text-center shadow-lg active:scale-[0.98] transition-transform mb-3"
           >
             Получить разбор →
           </button>
-          <p className="text-[11px] text-[#8b7b6f] tracking-wide">
+          <p className="text-[11px] text-[#6a5a50] tracking-wide">
             Бесплатно · Без регистрации · 5 минут
           </p>
 
@@ -754,11 +806,13 @@ export default function Home() {
     const question    = quizData[quizIndex];
     const total       = quizData.length;
     const progressPct = (quizIndex / total) * 100;
+    const qtype       = question.type || 'single';
 
     return (
       <>
         {IOSOverlay}
         <main className="min-h-screen bg-[#1a1410] flex flex-col px-5 pt-8 pb-10">
+          {/* Шапка */}
           <div className="flex items-center justify-between mb-4">
             {quizIndex > 0
               ? <button onClick={goToPrevQuestion} className="text-[#a89f94] text-sm hover:text-[#d4cfc8] transition-colors">← Назад</button>
@@ -769,32 +823,132 @@ export default function Home() {
             <div className="w-10" />
           </div>
 
+          {/* Прогресс-бар */}
           <div className="w-full h-1.5 bg-[#3d352a] rounded-full mb-8">
             <div className="h-full bg-[#c46a3e] rounded-full transition-all duration-500"
               style={{ width: `${progressPct}%` }} />
           </div>
 
-          <h2 className="text-xl font-semibold text-[#f5ede3] leading-snug mb-8 max-w-sm mx-auto">
-            {question.question_text}
-          </h2>
+          {/* Формат A — Single */}
+          {qtype === 'single' && (
+            <>
+              <h2 className="text-xl font-semibold text-[#f5ede3] leading-snug mb-8 max-w-sm mx-auto w-full">
+                {question.question_text}
+              </h2>
+              <div className="flex flex-col gap-3 w-full max-w-sm mx-auto">
+                {question.options.map((option, idx) => {
+                  const isSelected = selectedAnswer === idx;
+                  return (
+                    <button key={idx} onClick={() => selectAnswer(idx)}
+                      disabled={selectedAnswer !== null}
+                      className={['w-full px-5 py-4 rounded-3xl text-left text-sm leading-snug transition-all duration-200 shadow-sm',
+                        isSelected
+                          ? 'bg-[#c46a3e] text-white shadow-md scale-[1.01]'
+                          : 'bg-[#2a2318] text-[#d4cfc8] active:scale-[0.98]',
+                        selectedAnswer !== null && !isSelected ? 'opacity-40' : '',
+                      ].join(' ')}>
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
-          <div className="flex flex-col gap-3 w-full max-w-sm mx-auto">
-            {question.options.map((option, idx) => {
-              const isSelected = selectedAnswer === idx;
-              return (
-                <button key={idx} onClick={() => selectAnswer(idx)}
-                  disabled={selectedAnswer !== null}
-                  className={['w-full px-5 py-4 rounded-3xl text-left text-sm leading-snug transition-all duration-200 shadow-sm',
-                    isSelected
-                      ? 'bg-[#c46a3e] text-white shadow-[#1a1410] shadow-md scale-[1.01]'
-                      : 'bg-[#2a2318] text-[#d4cfc8] hover:bg-[#2a2318] active:scale-[0.98]',
-                    selectedAnswer !== null && !isSelected ? 'opacity-40' : '',
-                  ].join(' ')}>
-                  {option}
+          {/* Формат B — Multi */}
+          {qtype === 'multi' && (
+            <>
+              <p className="text-[#c46a3e] text-xs font-semibold uppercase tracking-widest mb-3 max-w-sm mx-auto w-full">
+                Отметь всё, что про тебя
+              </p>
+              <h2 className="text-xl font-semibold text-[#f5ede3] leading-snug mb-6 max-w-sm mx-auto w-full">
+                {question.question_text}
+              </h2>
+              <div className="flex flex-col gap-3 w-full max-w-sm mx-auto mb-8">
+                {question.options.map((option, idx) => {
+                  const checked = multiSelected.has(idx);
+                  return (
+                    <button key={idx}
+                      onClick={() => {
+                        setMultiSelected(prev => {
+                          const next = new Set(prev);
+                          next.has(idx) ? next.delete(idx) : next.add(idx);
+                          return next;
+                        });
+                      }}
+                      className={['w-full px-5 py-4 rounded-3xl text-left text-sm leading-snug transition-all duration-200 flex items-start gap-3',
+                        checked
+                          ? 'bg-[#2a1e14] border border-[#c46a3e] text-[#f5ede3]'
+                          : 'bg-[#2a2318] border border-transparent text-[#d4cfc8] active:scale-[0.98]',
+                      ].join(' ')}>
+                      <span className={['mt-0.5 w-5 h-5 rounded-md flex-shrink-0 flex items-center justify-center border transition-colors',
+                        checked ? 'bg-[#c46a3e] border-[#c46a3e]' : 'border-[#4a3f35]',
+                      ].join(' ')}>
+                        {checked && <span className="text-white text-xs font-bold">✓</span>}
+                      </span>
+                      {option}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="w-full max-w-sm mx-auto">
+                <button
+                  onClick={handleMultiNext}
+                  disabled={multiSelected.size === 0}
+                  className="w-full py-4 rounded-3xl font-semibold text-sm transition-all duration-200 disabled:opacity-30 bg-[#c46a3e] text-white active:scale-[0.98]">
+                  Дальше
                 </button>
-              );
-            })}
-          </div>
+              </div>
+            </>
+          )}
+
+          {/* Формат C — Scale */}
+          {qtype === 'scale' && (
+            <>
+              <h2 className="text-xl font-semibold text-[#f5ede3] leading-snug mb-10 max-w-sm mx-auto w-full">
+                {question.question_text}
+              </h2>
+              <div className="w-full max-w-sm mx-auto mb-10">
+                {/* Метки краёв */}
+                <div className="flex justify-between mb-5 gap-2">
+                  <span className={['text-xs leading-tight max-w-[40%] transition-colors', scaleValue <= 2 ? 'text-[#c46a3e] font-medium' : 'text-[#6a5a50]'].join(' ')}>
+                    {question.scale_left}
+                  </span>
+                  <span className={['text-xs leading-tight max-w-[40%] text-right transition-colors', scaleValue >= 4 ? 'text-[#c46a3e] font-medium' : 'text-[#6a5a50]'].join(' ')}>
+                    {question.scale_right}
+                  </span>
+                </div>
+                {/* Слайдер */}
+                <input
+                  type="range" min="1" max="5" step="1"
+                  value={scaleValue}
+                  onChange={e => setScaleValue(Number(e.target.value))}
+                  className="w-full appearance-none h-2 rounded-full outline-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #c46a3e ${(scaleValue - 1) * 25}%, #3d352a ${(scaleValue - 1) * 25}%)`,
+                  }}
+                />
+                {/* Точки */}
+                <div className="flex justify-between mt-3 px-0.5">
+                  {[1,2,3,4,5].map(v => (
+                    <button key={v} onClick={() => setScaleValue(v)}
+                      className={['w-7 h-7 rounded-full text-xs font-semibold transition-all duration-200',
+                        scaleValue === v ? 'bg-[#c46a3e] text-white scale-110' : 'bg-[#2a2318] text-[#6a5a50]',
+                      ].join(' ')}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="w-full max-w-sm mx-auto">
+                <button
+                  onClick={handleScaleNext}
+                  className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-sm active:scale-[0.98] transition-all duration-200">
+                  Дальше
+                </button>
+              </div>
+            </>
+          )}
         </main>
       </>
     );
@@ -835,12 +989,12 @@ export default function Home() {
   // ══════════════════════════════════════════════════════════════════════════
   if (screen === 'result' && resultData) {
     const {
-      block1_see, block2_want, chart_gap,
-      block3_hold, chart_root,
-      block4_lose, block5_dig,
-      suggested_questions, cta_button_targeted, action_step,
+      block1_mirror, block2_problem, block3_pointB,
+      block4_lose, questions, cta_button_targeted, action_step,
     } = resultData;
-    const canSubmitLead = leadTelegram.trim() && leadPhone.trim() && consentData && consentMarketing;
+    const chart_root   = block2_problem?.chart_root  ?? {};
+    const before_after = block3_pointB?.before_after ?? {};
+    const canSubmitLead = leadName.trim() && (leadTelegram.trim() || leadPhone.trim()) && consentData && consentMarketing;
 
     return (
       <>
@@ -867,7 +1021,7 @@ export default function Home() {
                   <p className="text-[#8b7b6f] text-xs text-center mb-4">Нажми на вопрос, чтобы получить ответ</p>
                 )}
                 <div className="flex flex-col gap-2 mb-4">
-                  {suggested_questions?.map((q, i) => {
+                  {questions?.map((q, i) => {
                     const isAsked   = askedQuestions.has(i);
                     const isLoading = loadingQuestion === i;
                     return (
@@ -901,56 +1055,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── Попап: лид-форма ──────────────────────────────────────────── */}
-        {showLeadModal && (
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end justify-center p-4"
-            onClick={e => { if (e.target === e.currentTarget) setShowLeadModal(false); }}>
-            <div className="w-full max-w-sm bg-[#fff9f4] rounded-3xl shadow-2xl overflow-hidden"
-              style={{ maxHeight: '92vh', overflowY: 'auto' }}>
-              <div className="flex justify-between items-center px-5 py-4 border-b border-[#e8dcd0]">
-                <h3 className="font-semibold text-[#2d2520]">Получить рекомендацию</h3>
-                {!leadSubmitting && (
-                  <button onClick={() => setShowLeadModal(false)}
-                    className="w-8 h-8 rounded-full bg-[#3d352a] flex items-center justify-center text-[#8b7b6f] text-sm">✕</button>
-                )}
-              </div>
-              <div className="p-5 flex flex-col gap-4">
-                <p className="text-stone-500 text-sm leading-relaxed">
-                  Оставь контакты - и мы пришлём первый конкретный шаг
-                </p>
-                <input type="text" value={leadTelegram} onChange={e => setLeadTelegram(e.target.value)}
-                  placeholder="Ваш ник в Telegram (@username)"
-                  className="w-full px-4 py-3.5 rounded-2xl border border-[#dcc9ba] bg-[#fff9f4] text-[#2d2520] text-sm focus:outline-none focus:border-[#c46a3e] placeholder-stone-300" />
-                <input type="tel" value={leadPhone} onChange={e => setLeadPhone(e.target.value)}
-                  placeholder="Ваш телефон"
-                  className="w-full px-4 py-3.5 rounded-2xl border border-[#dcc9ba] bg-[#fff9f4] text-[#2d2520] text-sm focus:outline-none focus:border-[#c46a3e] placeholder-stone-300" />
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={consentData} onChange={e => setConsentData(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-[#c46a3e]" />
-                  <span className="text-[#8b7b6f] text-xs leading-relaxed">
-                    Я даю <a href="https://ifpp-inc.ru/soglasie1" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">согласие на обработку персональных данных</a> в соответствии с <a href="https://ifpp-inc.ru/politikanew" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">Политикой обработки персональных данных</a>
-                  </span>
-                </label>
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={consentMarketing} onChange={e => setConsentMarketing(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 flex-shrink-0 accent-[#c46a3e]" />
-                  <span className="text-[#8b7b6f] text-xs leading-relaxed">
-                    Я даю <a href="https://ifpp-inc.ru/soglasie2" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">согласие на получение рекламных рассылок</a>
-                  </span>
-                </label>
-                <button onClick={submitLeadForm} disabled={!canSubmitLead || leadSubmitting}
-                  className={[
-                    'w-full py-4 rounded-3xl font-semibold text-base transition-all',
-                    canSubmitLead && !leadSubmitting
-                      ? 'bg-[#c46a3e] text-white shadow-md shadow-[#dcc9ba] active:scale-[0.98]'
-                      : 'bg-[#3d352a] text-[#9b8b7f] cursor-not-allowed',
-                  ].join(' ')}>
-                  {leadSubmitting ? 'Отправляем...' : 'Получить рекомендацию →'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ── Основной экран ────────────────────────────────────────────── */}
         <main className="min-h-screen bg-[#f9f5f0] pb-20">
@@ -975,127 +1079,163 @@ export default function Home() {
             <p className="text-[#8b7b6f] text-[13px]">Читай внимательно - это про тебя</p>
           </div>
 
-          {/* Блок 1: Вот что я вижу */}
+          {/* Блок 1: Зеркало */}
           <div className="px-5 max-w-sm mx-auto mb-4">
             <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-[#fff9f4] flex items-center justify-center flex-shrink-0">
+              <div className="flex items-start gap-3 mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-[#f0ebe6] flex items-center justify-center flex-shrink-0">
                   <span className="text-xl">🪞</span>
                 </div>
                 <div className="flex-1 pt-0.5">
                   <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-0.5">Зеркало</p>
-                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что я вижу</h3>
+                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Точка А: где ты сейчас</h3>
                 </div>
               </div>
-              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block1_see}</p>
+
+              <div className="flex flex-col gap-5">
+                {block1_mirror?.points?.map((point, i) => (
+                  <div key={i}>
+                    {i > 0 && <div className="border-t border-dashed border-[#e8dcd0] mb-5" />}
+                    {point.said ? (
+                      <>
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f]">Ты сказала</span>
+                        </div>
+                        <div className="bg-[#f0ebe6] border-l-2 border-[#8b7b6f] rounded-r-xl pl-4 pr-4 py-3 mb-3">
+                          <p className="text-[#5a4a42] text-[14px] leading-[1.65] italic">"{point.said}"</p>
+                        </div>
+                        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-1.5">Поэтому</p>
+                        <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{point.because}</p>
+                      </>
+                    ) : (
+                      <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{point.text}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {block1_mirror?.conclusion && (
+                <div className="mt-5 pt-4 border-t border-[#e8dcd0]">
+                  <div className="bg-[#fff3ec] border border-[#dcc9ba] rounded-2xl px-4 py-3">
+                    <p className="text-[#5a4a42] text-[14px] leading-[1.65]">{block1_mirror.conclusion}</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Блок 2: Вот чего ты на самом деле хочешь */}
-          <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-gradient-to-br from-rose-50 to-amber-50 rounded-3xl px-6 py-5 shadow-sm border border-rose-100">
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-[#fff9f4]/70 flex items-center justify-center flex-shrink-0">
-                  <span className="text-xl">✨</span>
-                </div>
-                <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-500 mb-0.5">Желание</p>
-                  <h3 className="text-rose-700 font-semibold text-[15px] leading-snug">Вот чего ты на самом деле хочешь</h3>
-                </div>
-              </div>
-              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block2_want}</p>
-            </div>
-          </div>
-
-          {/* Визуализация «Разрыв» */}
+          {/* Блок 2: Ключевая проблема */}
           <div className="px-5 max-w-sm mx-auto mb-6">
-            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
-              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f] text-center mb-5">Разрыв между реальностью и желаемым</p>
-              <div className="mb-4">
-                <div className="flex justify-between text-[13px] mb-2">
-                  <span className="text-[#8b7b6f]">Где сейчас</span>
-                  <span className="text-stone-500 font-semibold">{chart_gap.current}%</span>
-                </div>
-                <div className="w-full h-3 bg-[#3d352a] rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-stone-200 to-stone-300 rounded-full transition-all duration-1000 ease-out"
-                    style={{ width: chartsVisible ? `${chart_gap.current}%` : '0%' }} />
-                </div>
-              </div>
-              <div className="mb-5">
-                <div className="flex justify-between text-[13px] mb-2">
-                  <span className="text-[#c46a3e]">Где хочу быть</span>
-                  <span className="text-rose-500 font-semibold">{chart_gap.desired}%</span>
-                </div>
-                <div className="w-full h-3 bg-[#3d352a] rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-rose-300 to-rose-400 rounded-full transition-all duration-1000 ease-out"
-                    style={{ width: chartsVisible ? `${chart_gap.desired}%` : '0%', transitionDelay: '300ms' }} />
-                </div>
-              </div>
-              <div className="flex items-center justify-center gap-2 pt-3 border-t border-[#e8dcd0]">
-                <span className="text-[#8b7b6f] text-[13px]">Разрыв:</span>
-                <span className="text-xl font-bold text-rose-500">{chart_gap.desired - chart_gap.current}%</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Блок 3: Вот что тебя держит */}
-          <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#dcc9ba]">
-              <div className="flex items-start gap-3 mb-4">
+            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#c46a3e]/30">
+              <div className="flex items-start gap-3 mb-5">
                 <div className="w-10 h-10 rounded-2xl bg-[#3d352a] flex items-center justify-center flex-shrink-0">
                   <span className="text-xl">⚓</span>
                 </div>
                 <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f] mb-0.5">Корень</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-0.5">Ключевая проблема</p>
                   <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что тебя держит</h3>
                 </div>
               </div>
-              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block3_hold}</p>
+
+              {block2_problem?.title && (
+                <div className="bg-[#fff3ec] border border-[#c46a3e]/40 rounded-2xl px-4 py-3.5 mb-4">
+                  <p className="text-[#2d2520] font-semibold text-[16px] leading-snug">{block2_problem.title}</p>
+                </div>
+              )}
+
+              <p className="text-[#5a4a42] text-[15px] leading-[1.7] mb-5">{block2_problem?.mechanism}</p>
+
+              {chart_root.surface && (
+                <>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="flex-1 h-px bg-[#e8dcd0]" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f] flex-shrink-0">Как это устроено внутри</span>
+                    <div className="flex-1 h-px bg-[#e8dcd0]" />
+                  </div>
+                  <div className="flex flex-col items-center gap-0">
+                    <div className="w-full bg-white border border-[#e8dcd0] rounded-2xl px-4 py-3.5">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-stone-300 flex-shrink-0" />
+                        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f]">Снаружи</span>
+                      </div>
+                      <p className="text-stone-500 text-[14px] leading-snug">{chart_root.surface}</p>
+                    </div>
+                    <div className="w-px h-3 bg-gradient-to-b from-stone-200 to-[#d97a4e]" />
+                    <div className="w-full bg-white border border-[#dcc9ba] rounded-2xl px-4 py-3.5">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-2 h-2 rounded-full bg-[#d97a4e] flex-shrink-0" />
+                        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e]">Глубже</span>
+                      </div>
+                      <p className="text-[#5a4a42] text-[14px] leading-snug">{chart_root.deep}</p>
+                    </div>
+                    <div className="w-px h-3 bg-gradient-to-b from-[#d97a4e] to-[#c46a3e]" />
+                    <div className="w-full bg-[#2d2520] rounded-2xl px-4 py-4">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-sm">🌱</span>
+                        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e]">Родовой корень</span>
+                      </div>
+                      <p className="text-[#f5ede3] text-[14px] font-semibold leading-snug">{chart_root.root}</p>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
-          {/* Визуализация «Корень» */}
+          {/* Блок 3: Точка Б */}
           <div className="px-5 max-w-sm mx-auto mb-6">
-            <div className="flex flex-col items-center">
-              <div className="w-full bg-[#fff9f4] border border-[#dcc9ba] rounded-2xl px-5 py-4">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <div className="w-2 h-2 rounded-full bg-stone-300 flex-shrink-0" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f]">Снаружи</span>
-                </div>
-                <p className="text-stone-500 text-[14px]">{chart_root.surface}</p>
-              </div>
-              <div className="w-px h-4 bg-gradient-to-b from-stone-200 to-rose-200" />
-              <div className="w-full bg-[#fff9f4] border border-rose-100 rounded-2xl px-5 py-4">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <div className="w-2 h-2 rounded-full bg-[#d97a4e] flex-shrink-0" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e]">Глубже</span>
-                </div>
-                <p className="text-[#5a4a42] text-[14px]">{chart_root.deep}</p>
-              </div>
-              <div className="w-px h-4 bg-gradient-to-b from-rose-200 to-rose-400" />
-              <div className="w-full bg-gradient-to-br from-rose-100 to-rose-50 border border-[#c46a3e] rounded-2xl px-5 py-5">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-base">🌱</span>
-                  <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-500">Родовой корень</span>
-                </div>
-                <p className="text-[#2d2520] text-[14px] font-semibold">{chart_root.root}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Блок 4: Вот что ты теряешь */}
-          <div className="px-5 max-w-sm mx-auto mb-4">
-            <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-amber-100">
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-10 h-10 rounded-2xl bg-amber-50 flex items-center justify-center flex-shrink-0">
-                  <span className="text-xl">⏳</span>
+            <div className="bg-gradient-to-br from-rose-50 to-amber-50 rounded-3xl px-6 py-5 shadow-sm border border-rose-100">
+              <div className="flex items-start gap-3 mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-white/70 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xl">✨</span>
                 </div>
                 <div className="flex-1 pt-0.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-amber-400 mb-0.5">Цена</p>
-                  <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Вот что ты теряешь</h3>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-400 mb-0.5">Точка Б</p>
+                  <h3 className="text-rose-800 font-semibold text-[15px] leading-snug">Куда ты хочешь</h3>
                 </div>
               </div>
-              <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block4_lose}</p>
+
+              <p className="text-[#5a4a42] text-[15px] leading-[1.7] mb-5">{block3_pointB?.text}</p>
+
+              {block3_pointB?.superpower && (
+                <div className="bg-[#fffbf0] border border-amber-200 rounded-2xl px-4 py-3.5 mb-5">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <span className="text-base">💛</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-amber-500">Твоя суперсила</span>
+                  </div>
+                  <p className="text-[#5a4a42] text-[14px] leading-[1.65]">{block3_pointB.superpower}</p>
+                </div>
+              )}
+
+              {before_after.now && before_after.want && (
+                <>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="flex-1 h-px bg-rose-100" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-rose-300 flex-shrink-0">Твой путь</span>
+                    <div className="flex-1 h-px bg-rose-100" />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="bg-white/60 border border-rose-100 rounded-2xl px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#8b7b6f] mb-1">Сейчас</p>
+                      <p className="text-[#5a4a42] text-[14px] leading-snug">{before_after.now}</p>
+                    </div>
+                    <div className="flex justify-center">
+                      <span className="text-rose-300 text-lg">↓</span>
+                    </div>
+                    <div className="bg-white border border-rose-200 rounded-2xl px-4 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-rose-400 mb-1">Хочу</p>
+                      <p className="text-[#2d2520] text-[14px] leading-snug font-medium">{before_after.want}</p>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Блок 4: без заголовка */}
+          <div className="px-5 max-w-sm mx-auto mb-4">
+            <div className="bg-[#fff9f4] rounded-3xl px-6 py-6 shadow-sm border border-[#e8dcd0]">
+              <p className="text-[#5a4a42] text-[15px] leading-[1.8]">{block4_lose}</p>
             </div>
           </div>
 
@@ -1109,61 +1249,122 @@ export default function Home() {
           </div>
           */}
 
-          {/* Главные CTA (скрыты после отправки формы) */}
-          {!showActionStep && (
-            <div className="px-5 max-w-sm mx-auto flex flex-col gap-3 mb-8">
-              <button onClick={() => setShowLeadModal(true)}
-                className="w-full py-4 rounded-3xl bg-[#fff9f4] text-[#5a4a42] font-medium text-sm border border-[#dcc9ba] active:scale-[0.98] transition-transform shadow-sm leading-snug text-left px-5">
-                Как выйти из этой ситуации сегодня?
-              </button>
-              {cta_button_targeted && (
-                <button onClick={() => setShowLeadModal(true)}
-                  className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform leading-snug px-5 text-left">
-                  {cta_button_targeted}
-                </button>
-              )}
-            </div>
-          )}
+          {/* Блок 5: Вопросы + форма + Куда копать */}
+          <div className="px-5 max-w-sm mx-auto mb-8">
 
-          {/* Блок 5 + финальный оффер раскрываются после отправки формы */}
-          <div ref={revealSectionRef} style={{
-            maxHeight: showActionStep ? '1400px' : '0px',
-            opacity:   showActionStep ? 1 : 0,
-            overflow:  'hidden',
-            transition: 'max-height 0.75s ease-in-out, opacity 0.5s ease-in-out 0.1s',
-          }}>
-            <div className="px-5 max-w-sm mx-auto mb-4 pt-2">
-              <div className="bg-gradient-to-br from-stone-50 to-white rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0]">
-                <div className="flex items-start gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-2xl bg-[#fff9f4] border border-[#e8dcd0] flex items-center justify-center flex-shrink-0">
-                    <span className="text-xl">🔍</span>
-                  </div>
-                  <div className="flex-1 pt-0.5">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8b7b6f] mb-0.5">Направление</p>
-                    <h3 className="text-stone-800 font-semibold text-[15px] leading-snug">Куда копать</h3>
+            {/* Шаг 1: Вопросы (скрываются после отправки формы) */}
+            {!showActionStep && (
+              <div className="mb-2">
+                <p className="text-[#2d2520] font-semibold text-[17px] leading-snug mb-2">
+                  Хочешь получить конкретный план, как это изменить?
+                </p>
+                <p className="text-[#8b7b6f] text-[14px] leading-relaxed mb-5">
+                  Выбери вопрос, который волнует больше всего - я подготовлю подробные рекомендации и пошаговый план лично для тебя.
+                </p>
+
+                <div className="flex flex-col gap-3 mb-5">
+                  {questions?.map((q, i) => {
+                    const isSelected = selectedQuestion === i;
+                    return (
+                      <button key={i}
+                        onClick={() => setSelectedQuestion(isSelected ? null : i)}
+                        className={[
+                          'w-full px-5 py-4 rounded-3xl text-left text-[15px] font-medium leading-snug transition-all active:scale-[0.98] border',
+                          isSelected
+                            ? 'bg-[#c46a3e] text-white border-[#c46a3e] shadow-md shadow-[#dcc9ba]'
+                            : 'bg-[#fff9f4] text-[#2d2520] border-[#dcc9ba] shadow-sm hover:border-[#c46a3e]',
+                        ].join(' ')}>
+                        <span className="flex items-center justify-between gap-3">
+                          <span>{q}</span>
+                          <span className="text-lg flex-shrink-0">{isSelected ? '✓' : '→'}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Шаг 2: Форма — раскрывается после выбора вопроса */}
+                <div style={{
+                  maxHeight: selectedQuestion !== null ? '700px' : '0px',
+                  opacity:   selectedQuestion !== null ? 1 : 0,
+                  overflow:  'hidden',
+                  transition: 'max-height 0.5s ease-in-out, opacity 0.35s ease-in-out',
+                }}>
+                  <div className="bg-[#fff9f4] border border-[#e8dcd0] rounded-3xl px-5 py-5 flex flex-col gap-4">
+                    <p className="text-[#5a4a42] text-[14px] leading-relaxed">
+                      Заполни - и я подготовлю подробный разбор с конкретными шагами. А ещё передам твою анкету специалисту, чтобы на встрече не тратить время на объяснения.
+                    </p>
+                    <input type="text" value={leadName} onChange={e => setLeadName(e.target.value)}
+                      placeholder="Твоё имя"
+                      className="w-full px-4 py-3.5 rounded-2xl border border-[#dcc9ba] bg-white text-[#2d2520] text-sm focus:outline-none focus:border-[#c46a3e] placeholder-stone-300" />
+                    <input type="text" value={leadTelegram} onChange={e => setLeadTelegram(e.target.value)}
+                      placeholder="Телеграм (@username)"
+                      className="w-full px-4 py-3.5 rounded-2xl border border-[#dcc9ba] bg-white text-[#2d2520] text-sm focus:outline-none focus:border-[#c46a3e] placeholder-stone-300" />
+                    <input type="tel" value={leadPhone} onChange={e => setLeadPhone(e.target.value)}
+                      placeholder="Или телефон"
+                      className="w-full px-4 py-3.5 rounded-2xl border border-[#dcc9ba] bg-white text-[#2d2520] text-sm focus:outline-none focus:border-[#c46a3e] placeholder-stone-300" />
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input type="checkbox" checked={consentData} onChange={e => setConsentData(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 flex-shrink-0 accent-[#c46a3e]" />
+                      <span className="text-[#8b7b6f] text-xs leading-relaxed">
+                        Я даю <a href="https://ifpp-inc.ru/soglasie1" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">согласие на обработку персональных данных</a> в соответствии с <a href="https://ifpp-inc.ru/politikanew" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">Политикой</a>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input type="checkbox" checked={consentMarketing} onChange={e => setConsentMarketing(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 flex-shrink-0 accent-[#c46a3e]" />
+                      <span className="text-[#8b7b6f] text-xs leading-relaxed">
+                        Я даю <a href="https://ifpp-inc.ru/soglasie2" target="_blank" rel="noopener noreferrer" className="text-[#c46a3e] underline">согласие на получение рассылок</a>
+                      </span>
+                    </label>
+                    <button onClick={submitLeadForm} disabled={!canSubmitLead || leadSubmitting}
+                      className={[
+                        'w-full py-4 rounded-3xl font-semibold text-base transition-all',
+                        canSubmitLead && !leadSubmitting
+                          ? 'bg-[#c46a3e] text-white shadow-md shadow-[#dcc9ba] active:scale-[0.98]'
+                          : 'bg-[#e8dcd0] text-[#9b8b7f] cursor-not-allowed',
+                      ].join(' ')}>
+                      {leadSubmitting ? 'Отправляем...' : 'Получить план →'}
+                    </button>
                   </div>
                 </div>
-                <p className="text-[#5a4a42] text-[15px] leading-[1.7]">{block5_dig}</p>
               </div>
-            </div>
+            )}
 
-            <div className="px-5 max-w-sm mx-auto mb-8">
+            {/* Шаг 3: Куда копать — раскрывается после отправки формы */}
+            <div ref={revealSectionRef} style={{
+              maxHeight: showActionStep ? '1600px' : '0px',
+              opacity:   showActionStep ? 1 : 0,
+              overflow:  'hidden',
+              transition: 'max-height 0.75s ease-in-out, opacity 0.5s ease-in-out 0.1s',
+            }}>
+              <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 shadow-sm border border-[#e8dcd0] mb-4">
+                <p className="text-[#5a4a42] text-[15px] leading-[1.8] mb-5">{action_step?.intro}</p>
+                {action_step?.week_task && (
+                  <div className="bg-[#fff3ec] border border-[#c46a3e]/30 rounded-2xl px-4 py-4">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#c46a3e] mb-1.5">Твой первый шаг на эту неделю</p>
+                    <p className="text-[#2d2520] text-[15px] font-medium leading-snug">{action_step.week_task}</p>
+                  </div>
+                )}
+              </div>
+
               <div className="bg-[#fff9f4] rounded-3xl px-6 py-5 border border-[#e8dcd0] shadow-sm">
-                <p className="text-[#2d2520] font-semibold text-center text-[15px] mb-5">
-                  Хотите записаться на разбор со специалистом?
-                </p>
+                {action_step?.transition && (
+                  <p className="text-[#5a4a42] text-[14px] leading-relaxed mb-5">{action_step.transition}</p>
+                )}
                 <div className="flex flex-col gap-3">
                   <button onClick={handleYesConsultation}
                     className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-md shadow-[#dcc9ba] active:scale-[0.98] transition-transform">
-                    Да, хочу →
+                    Записаться на встречу →
                   </button>
-                  <button onClick={() => { setAnswers([]); setScreen('telegram'); }}
+                  <button onClick={() => setScreen('telegram')}
                     className="w-full py-3 rounded-3xl text-[#8b7b6f] text-sm active:scale-[0.98] transition-transform">
-                    Нет, удалите мои ответы
+                    Перейти в телеграм-канал
                   </button>
                 </div>
               </div>
             </div>
+
           </div>
 
         </main>
@@ -1340,6 +1541,157 @@ export default function Home() {
   // ══════════════════════════════════════════════════════════════════════════
   // ЭКРАН АССИСТЕНТА (запись к эксперту)
   // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // ЭКРАН ВСТРЕЧИ
+  // ══════════════════════════════════════════════════════════════════════════
+  if (screen === 'meeting') {
+    const WHAT_ITEMS = [
+      { icon: '📋', text: 'Специалист уже видел твой разбор - не нужно ничего объяснять заново, сразу к сути' },
+      { icon: '🔍', text: 'Разберёт твою ситуацию глубже, чем смог квиз' },
+      { icon: '🎯', text: 'Покажет, что именно держит тебя на месте' },
+      { icon: '💬', text: 'Даст конкретные рекомендации именно под тебя и ответит на вопросы' },
+    ];
+    const HOW_ITEMS = [
+      { icon: '📹', label: 'Формат', text: 'Видеозвонок или обычный звонок - уточним при записи' },
+      { icon: '⏱', label: 'Время', text: '20 минут, без воды и лишних слов' },
+      { icon: '👤', label: 'Кто', text: 'Один на один с живым специалистом' },
+      { icon: '🤝', label: 'Атмосфера', text: 'Без давления - помогаем разобраться, не навязываем' },
+    ];
+    const FEARS = [
+      { q: 'Это правда бесплатно?', a: 'Да, совсем. Никаких скрытых условий и обязательств.' },
+      { q: 'Что если я передумаю?', a: 'Можно отменить или перенести в любой момент - без вопросов.' },
+      { q: 'Будут ли что-то продавать?', a: 'Специалист на встрече помогает разобраться. Если захочешь продолжить - предложат варианты. Но давить не будут.' },
+    ];
+
+    return (
+      <>
+        {IOSOverlay}
+        <main className="min-h-screen bg-[#1a1410] flex flex-col px-5 pt-8 pb-16">
+          <div className="flex items-center mb-8">
+            <button onClick={() => setScreen('result')} className="text-[#6a5a50] text-sm">
+              ← Назад
+            </button>
+          </div>
+
+          <div className="w-full max-w-sm mx-auto flex flex-col">
+
+            {/* Заголовок */}
+            <div className="text-center mb-8">
+              <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-[#c46a3e] mb-4">
+                Бесплатная встреча
+              </p>
+              <h1 className="text-[26px] font-semibold text-[#f5ede3] leading-tight mb-3">
+                Твоя встреча с родологом
+              </h1>
+              <p className="text-[#8b7b6f] text-sm leading-relaxed">
+                20 минут разговора - и ты поймёшь, что именно мешает тебе двигаться вперёд
+              </p>
+            </div>
+
+            {/* Что будет */}
+            <div className="bg-[#2a2318] rounded-3xl px-5 py-5 mb-4 border border-[#3d352a]">
+              <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-[#c46a3e] mb-4">
+                Что тебя ждёт
+              </p>
+              <div className="flex flex-col gap-4">
+                {WHAT_ITEMS.map((item, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <span className="text-lg flex-shrink-0 leading-none mt-0.5">{item.icon}</span>
+                    <p className="text-[#f5ede3] text-sm leading-relaxed">{item.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Как проходит */}
+            <div className="bg-[#2a2318] rounded-3xl px-5 py-5 mb-4 border border-[#3d352a]">
+              <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-[#c46a3e] mb-4">
+                Как это проходит
+              </p>
+              <div className="flex flex-col gap-4">
+                {HOW_ITEMS.map((item, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <span className="text-lg flex-shrink-0 leading-none mt-0.5">{item.icon}</span>
+                    <div>
+                      <p className="text-[#8b7b6f] text-[11px] font-semibold uppercase tracking-wide mb-0.5">{item.label}</p>
+                      <p className="text-[#f5ede3] text-sm leading-relaxed">{item.text}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Страхи */}
+            <div className="flex flex-col gap-3 mb-8">
+              <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-[#c46a3e] mt-2">
+                Это ни к чему не обязывает
+              </p>
+              {FEARS.map((f, i) => (
+                <div key={i} className="bg-[#221c14] rounded-2xl px-4 py-4 border border-[#3d352a]">
+                  <p className="text-[#f5ede3] text-sm font-semibold mb-1">{f.q}</p>
+                  <p className="text-[#8b7b6f] text-sm leading-relaxed">{f.a}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Форма */}
+            {!meetingSubmitted ? (
+              !meetingFormOpen ? (
+                <div className="text-center">
+                  <button
+                    onClick={() => setMeetingFormOpen(true)}
+                    className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-lg active:scale-[0.98] transition-transform mb-2"
+                  >
+                    Записаться на встречу →
+                  </button>
+                  <p className="text-[#6a5a50] text-xs">Выбери удобное время - уточним при звонке</p>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <p className="text-[#f5ede3] text-base font-semibold text-center mb-1">Оставь контакты</p>
+                  <p className="text-[#8b7b6f] text-sm text-center mb-2">Специалист свяжется и согласует время</p>
+                  <input
+                    type="text"
+                    placeholder="Твоё имя"
+                    value={meetingName}
+                    onChange={e => setMeetingName(e.target.value)}
+                    className="w-full bg-[#2a2318] border border-[#3d352a] rounded-2xl px-4 py-3 text-[#f5ede3] text-sm placeholder-[#6a5a50] outline-none focus:border-[#c46a3e] transition-colors"
+                  />
+                  <input
+                    type="tel"
+                    placeholder="Номер телефона"
+                    value={meetingPhone}
+                    onChange={e => setMeetingPhone(e.target.value)}
+                    className="w-full bg-[#2a2318] border border-[#3d352a] rounded-2xl px-4 py-3 text-[#f5ede3] text-sm placeholder-[#6a5a50] outline-none focus:border-[#c46a3e] transition-colors"
+                  />
+                  <button
+                    onClick={handleMeetingSubmit}
+                    disabled={meetingSubmitting || !meetingName.trim() || !meetingPhone.trim()}
+                    className="w-full py-4 rounded-3xl bg-[#c46a3e] text-white font-semibold text-base shadow-lg active:scale-[0.98] transition-transform disabled:opacity-50 mt-1"
+                  >
+                    {meetingSubmitting ? 'Отправляем...' : 'Отправить →'}
+                  </button>
+                  <p className="text-[#4a3f35] text-xs text-center">
+                    Нажимая кнопку, ты соглашаешься с тем, что мы свяжемся с тобой
+                  </p>
+                </div>
+              )
+            ) : (
+              <div className="bg-[#1e4012] border border-[#2a5a1a] rounded-3xl px-5 py-6 text-center">
+                <p className="text-2xl mb-3">✓</p>
+                <p className="text-[#6ecf47] font-semibold text-base mb-2">Заявка принята</p>
+                <p className="text-[#8b7b6f] text-sm leading-relaxed">
+                  Специалист свяжется с тобой в ближайшее время и согласует удобное время встречи
+                </p>
+              </div>
+            )}
+
+          </div>
+        </main>
+      </>
+    );
+  }
+
   if (screen === 'assistant') return (
     <>
       {IOSOverlay}
